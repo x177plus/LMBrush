@@ -1,8 +1,7 @@
 # Third-party notices
 
-LMBrush is licensed under GPL-3.0-or-later; see `LICENSE`. The third-party
-material below remains under its own license, which is compatible with the
-GPL.
+LMBrush is licensed under the MIT License; see `LICENSE`. The third-party
+material below remains under its own license.
 
 ## awesome-design-md
 

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Natural language to vector scene plan to SVG. Zero runtime dependencies.",
-  "license": "GPL-3.0-or-later",
+  "license": "MIT",
   "author": "x177plus",
   "keywords": [
     "svg",

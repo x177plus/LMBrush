@@ -1,6 +1,6 @@
 # LMBrush
 
-<a href="./LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License"></a>
+<a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20.6-339933?logo=node.js&logoColor=white" alt="Node.js 20.6+"></a>
 <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="Zero runtime dependencies">
 
@@ -16,16 +16,20 @@
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/gallery-portrait.jpg" alt="戴圆眼镜短发女孩的极细笔触肖像"><br><sub><b>极细笔触（0.45）</b> · 12048 笔 · “戴圆眼镜的短发女孩，暖色调。”</sub></td>
     <td width="50%"><img src="docs/images/gallery-sailboat.jpg" alt="日落海面帆船的经典笔触油画"><br><sub><b>经典笔触</b> · 3270 笔 · “日落时的海边帆船，极简风格。”</sub></td>
+    <td width="50%"><img src="docs/images/gallery-fox.jpg" alt="雪地狐狸的经典笔触油画"><br><sub><b>经典笔触</b> · 3245 笔 · “一只狐狸站在雪地里。”</sub></td>
   </tr>
   <tr>
     <td><img src="docs/images/gallery-blockin.jpg" alt="晨雾山谷的色块铺陈油画"><br><sub><b>色块铺陈</b> · 941 笔 · “晨雾中的山谷，远山、松树和一条河。”</sub></td>
-    <td><img src="docs/images/gallery-fox.jpg" alt="雪地狐狸的经典笔触油画"><br><sub><b>经典笔触</b> · 3245 笔 · “一只狐狸站在雪地里。”</sub></td>
+    <td><img src="docs/images/gallery-lighthouse.jpg" alt="暴风雨前悬崖灯塔的经典笔触油画"><br><sub><b>经典笔触</b> · 3321 笔 · “海边悬崖上的白色灯塔，暴风雨前的黄昏，海浪拍岸。”</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/gallery-desert.jpg" alt="沙漠红色岩石与落日的色块铺陈油画"><br><sub><b>色块铺陈</b> · 912 笔 · “沙漠中的红色岩石和落日，极简构图。”</sub></td>
+    <td><img src="docs/images/gallery-forest.jpg" alt="雨后森林蘑菇与蕨类的极细笔触油画"><br><sub><b>极细笔触（0.45）</b> · 13011 笔 · “雨后的森林，苔藓、蕨类和蘑菇，微距感。”</sub></td>
   </tr>
 </table>
 
-以上均为真实输出，未做后期处理；肖像与帆船由本地规则规划器生成，橘猫使用 LLM 计划。产品是 SVG，README 中的 JPEG 是浏览器栅格化后的展示图。
+以上均为真实输出，未做后期处理；帆船、山谷和狐狸由本地规则规划器生成，橘猫、灯塔、沙漠和森林使用 LLM 计划。产品是 SVG，README 中的 JPEG 是浏览器栅格化后的展示图。
 
 ```mermaid
 flowchart LR
@@ -717,7 +721,7 @@ VISION_PRICE_OUTPUT=0.60
 
 ## License
 
-本项目以 **GNU General Public License v3.0 or later** 发布，见 [LICENSE](LICENSE)。Copyright (c) 2026 x177plus。
+本项目以 **MIT License** 发布，见 [LICENSE](LICENSE)。Copyright (c) 2026 x177plus。
 
 `prompts/style-packs.json` 的配色与情绪词取自 [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md)（MIT）；上游版权与许可全文见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Claude、Linear、Stripe、Spotify、Apple 等名称是各自所有者的商标，本项目仅用它们描述配色风格，无隶属或背书关系。
 

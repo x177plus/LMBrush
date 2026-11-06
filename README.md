@@ -1,6 +1,6 @@
 # LMBrush
 
-<a href="./LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License"></a>
+<a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D20.6-339933?logo=node.js&logoColor=white" alt="Node.js 20.6+"></a>
 <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="Zero runtime dependencies">
 
@@ -46,18 +46,23 @@ browser-native ES modules.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/gallery-portrait.jpg" alt="Fine-brush portrait of a short-haired girl with round glasses"><br><sub><b>Fine brush (0.45)</b> · 12,048 strokes · “A short-haired girl with round glasses, warm palette.”</sub></td>
     <td width="50%"><img src="docs/images/gallery-sailboat.jpg" alt="Impressionist sailboat at sunset"><br><sub><b>Classic brush</b> · 3,270 strokes · “A sailboat at sea at sunset, minimalist style.”</sub></td>
+    <td width="50%"><img src="docs/images/gallery-fox.jpg" alt="Classic-brush fox standing in snow"><br><sub><b>Classic brush</b> · 3,245 strokes · “A fox standing in the snow.”</sub></td>
   </tr>
   <tr>
     <td><img src="docs/images/gallery-blockin.jpg" alt="Block-in painting of a misty valley"><br><sub><b>Block-in</b> · 941 strokes · “A misty valley with distant mountains, pines and a river.”</sub></td>
-    <td><img src="docs/images/gallery-fox.jpg" alt="Classic-brush fox standing in snow"><br><sub><b>Classic brush</b> · 3,245 strokes · “A fox standing in the snow.”</sub></td>
+    <td><img src="docs/images/gallery-lighthouse.jpg" alt="Classic-brush lighthouse on a cliff before a storm"><br><sub><b>Classic brush</b> · 3,321 strokes · “A white lighthouse on a sea cliff before a storm, at dusk.”</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/gallery-desert.jpg" alt="Block-in painting of red desert rocks at sunset"><br><sub><b>Block-in</b> · 912 strokes · “Red rocks and a setting sun in the desert, minimalist composition.”</sub></td>
+    <td><img src="docs/images/gallery-forest.jpg" alt="Fine-brush forest floor with mushrooms and ferns"><br><sub><b>Fine brush (0.45)</b> · 13,011 strokes · “A forest after rain: moss, ferns and mushrooms, close-up.”</sub></td>
   </tr>
 </table>
 
-Every image above is a real, unedited output. The portrait and sailboat were
-rendered by the local planner; the cat used an LLM plan. The SVG files are the
-product; the JPEGs here are browser-side rasterisations for this README.
+Every image above is a real, unedited output. The sailboat, valley and fox were
+rendered by the local planner; the cat, lighthouse, desert and forest used LLM
+plans. The SVG files are the product; the JPEGs here are browser-side
+rasterisations for this README.
 
 ## Quick start
 
@@ -628,7 +633,7 @@ per step.
 
 ## License
 
-LMBrush is licensed under the **GNU General Public License v3.0 or later**.
+LMBrush is licensed under the **MIT License**.
 See [LICENSE](LICENSE). Copyright (c) 2026 x177plus.
 
 `prompts/style-packs.json` contains colour palettes and mood words derived from
