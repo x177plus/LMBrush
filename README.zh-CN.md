@@ -746,6 +746,10 @@ VISION_PRICE_OUTPUT=0.60
 - 视觉解析结果只存在进程内（最多 12 条），重启后失效；参考图原文件不保存，历史记录只保留生成的 SVG 和计划，想再次重绘需要重新上传。
 - 长宽比超过 7.5:1、边长超过 768px 或请求体超过 4 MB 的参考图会被拒绝；页面端还会限制文件大小 20 MB，并在解码前用文件头尺寸拒绝超过 4000 万像素的图片，避免超大图卡死浏览器。
 
+## 社区与致谢
+
+- [LINUX DO](https://linux.do) —— 新的理想型社区，Where possible begins。
+
 ## License
 
 本项目以 **MIT License** 发布，见 [LICENSE](LICENSE)。Copyright (c) 2026 x177plus。

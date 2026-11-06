@@ -668,6 +668,10 @@ reasoning 3–5k, plan 2–3k; critique 1–2k; repair 3–4k; detail 1–3k per
 `meta.usage` and, with prices configured, `meta.cost` report the exact numbers
 per step.
 
+## Community & Acknowledgments
+
+- [LINUX DO](https://linux.do) — a new kind of ideal community. Where possible begins.
+
 ## License
 
 LMBrush is licensed under the **MIT License**.
