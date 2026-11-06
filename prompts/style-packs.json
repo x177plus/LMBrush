@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "note": "Curated palettes derived from VoltAgent/awesome-design-md (MIT). Only colors and mood are used; typography, spacing and components are intentionally dropped.",
+  "packs": {
+    "claude": {
+      "label": "Claude",
+      "source": "https://github.com/VoltAgent/awesome-design-md/tree/main/design-md/claude",
+      "mood": "温暖、编辑感、人文；避免冷蓝和霓虹",
+      "background": [
+        "#faf9f5",
+        "#f5f0e8"
+      ],
+      "subject": [
+        "#cc785c",
+        "#a9583e"
+      ],
+      "ink": "#141413",
+      "accent": [
+        "#5db8a6",
+        "#e8a55a"
+      ]
+    },
+    "linear": {
+      "label": "Linear",
+      "source": "https://github.com/VoltAgent/awesome-design-md/tree/main/design-md/linear.app",
+      "mood": "近黑、精密、技术感；紫色只做单点强调",
+      "background": [
+        "#010102",
+        "#0f1011"
+      ],
+      "subject": [
+        "#f7f8f8",
+        "#d0d6e0"
+      ],
+      "ink": "#000000",
+      "accent": [
+        "#5e6ad2",
+        "#8a8f98"
+      ]
+    },
+    "stripe": {
+      "label": "Stripe",
+      "source": "https://github.com/VoltAgent/awesome-design-md/tree/main/design-md/stripe",
+      "mood": "白底、靛蓝、渐变氛围；高饱和点缀要克制",
+      "background": [
+        "#ffffff",
+        "#f6f9fc"
+      ],
+      "subject": [
+        "#0d253d",
+        "#533afd"
+      ],
+      "ink": "#1c1e54",
+      "accent": [
+        "#ea2261",
+        "#f5e9d4"
+      ]
+    },
+    "spotify": {
+      "label": "Spotify",
+      "source": "https://github.com/VoltAgent/awesome-design-md/tree/main/design-md/spotify",
+      "mood": "近黑沉浸、单一绿色强调、内容优先",
+      "background": [
+        "#121212",
+        "#181818"
+      ],
+      "subject": [
+        "#1ed760",
+        "#fdfdfd"
+      ],
+      "ink": "#000000",
+      "accent": [
+        "#b3b3b3",
+        "#539df5"
+      ]
+    },
+    "apple": {
+      "label": "Apple",
+      "source": "https://github.com/VoltAgent/awesome-design-md/tree/main/design-md/apple",
+      "mood": "白与羊皮纸、产品优先、单一蓝色交互；极简",
+      "background": [
+        "#ffffff",
+        "#f5f5f7"
+      ],
+      "subject": [
+        "#1d1d1f",
+        "#0066cc"
+      ],
+      "ink": "#000000",
+      "accent": [
+        "#7a7a7a",
+        "#d2d2d7"
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+eval/report.json
+.vercel/
+.claude/
+.serena/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log

@@ -1,0 +1,27 @@
+{
+  "name": "lmbrush",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Natural language to vector scene plan to SVG. Zero runtime dependencies.",
+  "license": "GPL-3.0-or-later",
+  "author": "x177plus",
+  "keywords": [
+    "svg",
+    "generative-art",
+    "llm",
+    "oil-painting",
+    "vector",
+    "zero-dependencies"
+  ],
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "start:env": "node --env-file=.env server.js",
+    "dev": "node server.js",
+    "test": "node --import ./scripts/hermetic-env.mjs --test",
+    "eval": "node eval/run.js"
+  },
+  "engines": {
+    "node": ">=20.6"
+  }
+}

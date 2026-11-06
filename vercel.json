@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "public",
+  "functions": {
+    "api/*.js": {
+      "includeFiles": "prompts/**",
+      "excludeFiles": "{public,test,eval}/**"
+    }
+  }
+}
