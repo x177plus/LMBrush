@@ -459,6 +459,35 @@ Platform limits (Vercel docs, 2026-08):
 - Vercel defaults to Node 26. If the upstream model endpoint has trouble with
   Node 26 HTTP/2 `fetch`, set `VERCEL_FETCH_DISABLE_H2=1` and redeploy.
 
+### Serving from a subpath
+
+The front end uses relative asset and API URLs, so it runs unchanged at a
+domain root or under a path such as `https://app.177.plus/LMBrush/`. Vercel
+binds a project to a domain root, so the **parent project that owns
+`app.177.plus`** must proxy the path to this deployment:
+
+```json
+{
+  "redirects": [
+    { "source": "/LMBrush", "destination": "/LMBrush/", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/LMBrush/", "destination": "https://<lmbrush-deployment>.vercel.app/" },
+    { "source": "/LMBrush/:path*", "destination": "https://<lmbrush-deployment>.vercel.app/:path*" }
+  ]
+}
+```
+
+- Keep these rules before any catch-all rewrite in the parent project.
+- The trailing-slash redirect matters: `styles.css` and `api/health` resolve
+  relative to the document URL.
+- Login links must include the prefix and the post-login path:
+  `https://app.177.plus/LMBrush/api/login?token=<token>&next=/LMBrush/`.
+- Do not add `/LMBrush` rewrites to this project's own `vercel.json`: it is
+  served at the deployment root and the parent strips the prefix.
+- Non-Vercel proxies work the same way: strip `/LMBrush` before forwarding and
+  redirect `/LMBrush` to `/LMBrush/`.
+
 For long connections, large SVGs or a persistent cache, run `npm start` on a
 VPS, Render, Railway or Fly.io — the `api/` adapters are not needed there.
 

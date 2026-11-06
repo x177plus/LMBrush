@@ -92,6 +92,29 @@ Vercel 的零配置 Node server 入口是根目录（或 `src/`）的 `server.ts
 - Vercel 当前默认 Node 26。若上游模型端点对 Node 26 的 HTTP/2 `fetch` 不兼容，设 `VERCEL_FETCH_DISABLE_H2=1` 后重新部署。
 - 前端仍受 4 MB 的 `/api/repaint` 请求体限制；页面端的 20 MB 文件限制不会改变平台上限。
 
+### 部署在二级目录
+
+前端资源和 API 都使用相对路径，因此同一份代码既能在域名根路径运行，也能放在 `https://app.177.plus/LMBrush/` 这类子路径下。Vercel 的项目只能绑定域名根，所以要在**持有 `app.177.plus` 的父项目**里把路径代理到本项目的部署：
+
+```json
+{
+  "redirects": [
+    { "source": "/LMBrush", "destination": "/LMBrush/", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/LMBrush/", "destination": "https://<lmbrush-deployment>.vercel.app/" },
+    { "source": "/LMBrush/:path*", "destination": "https://<lmbrush-deployment>.vercel.app/:path*" }
+  ]
+}
+```
+
+- 这些规则要放在父项目任何 catch-all rewrite 之前。
+- 末尾斜杠的重定向不能省：`styles.css` 和 `api/health` 都是相对当前文档 URL 解析的。
+- 登录链接要带前缀和登录后路径：
+  `https://app.177.plus/LMBrush/api/login?token=<口令>&next=/LMBrush/`
+- 不要把 `/LMBrush` 的 rewrite 加到本项目自己的 `vercel.json`：本项目部署在根路径，由父项目剥掉前缀。
+- 非 Vercel 的反向代理同理：转发前剥掉 `/LMBrush`，并把 `/LMBrush` 重定向到 `/LMBrush/`。
+
 不想受 Serverless 限制（长连接、超大 SVG、常驻缓存）时，用 Render / Railway / Fly.io / 自有 VPS 跑 `npm start` 即可；`server.js` 不需要 `api/` 适配层。
 
 ## 油画笔触是怎么来的

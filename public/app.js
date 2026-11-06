@@ -14,6 +14,8 @@ const HISTORY_MAX = 4;
 const REFERENCE_MAX_SIDE = 512;
 const REFERENCE_MIN_SIDE = 8;
 const REFERENCE_MAX_FILE = 20 * 1024 * 1024;
+/* Works both at the domain root and under a subpath such as /LMBrush/. */
+const LOGIN_PATH = new URL("api/login", document.baseURI).pathname;
 
 const state = {
   style: "auto",
@@ -211,7 +213,7 @@ function init() {
 
 async function checkHealth() {
   try {
-    const response = await fetch("/api/health");
+    const response = await fetch("api/health");
     const data = await response.json();
     state.llm = Boolean(data.llm && data.llm.configured);
     state.vision = Boolean(data.vision && data.vision.configured);
@@ -236,7 +238,7 @@ async function checkHealth() {
     if (state.locked) {
       els.generate.disabled = true;
       setStatus("error", "需要访问口令");
-      els.hint.textContent = "此演示需要访问口令。请用部署者提供的 /api/login?token=… 链接打开一次，再回到此页面生成。";
+      els.hint.textContent = `此演示需要访问口令。请用部署者提供的 ${LOGIN_PATH}?token=… 链接打开一次，再回到此页面生成。`;
       els.hint.classList.add("warn");
       return;
     }
@@ -518,7 +520,7 @@ function setReferenceError(message) {
 async function enrich() {
   if (state.busy || !state.llm) return;
   if (state.locked) {
-    setReferenceError("此演示需要访问口令。请用部署者提供的 /api/login?token=… 链接打开一次。");
+    setReferenceError(`此演示需要访问口令。请用部署者提供的 ${LOGIN_PATH}?token=… 链接打开一次。`);
     return;
   }
   const prompt = (state.sourcePrompt || els.prompt.value).trim();
@@ -538,7 +540,7 @@ async function enrich() {
   els.hint.textContent = "正在让 LLM 扩展描述…";
 
   try {
-    const response = await fetch("/api/enrich", {
+    const response = await fetch("api/enrich", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ prompt, nonce: Date.now() }),
@@ -575,7 +577,7 @@ function restorePrompt() {
 }
 
 async function postPipeline(step, payload) {
-  const response = await fetch("/api/pipeline", {
+  const response = await fetch("api/pipeline", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ step, ...payload }),
@@ -763,7 +765,7 @@ async function runGeneratePipeline(payload, prompt, started) {
 async function generate({ forceNew = false } = {}) {
   if (state.busy || state.referenceBusy) return;
   if (state.locked) {
-    showError("此演示需要访问口令。请用部署者提供的 /api/login?token=… 链接打开一次。");
+    showError(`此演示需要访问口令。请用部署者提供的 ${LOGIN_PATH}?token=… 链接打开一次。`);
     return;
   }
   const prompt = els.prompt.value.trim();
@@ -836,7 +838,7 @@ async function generate({ forceNew = false } = {}) {
         };
 
     if (reference) {
-      const response = await fetch("/api/repaint", {
+      const response = await fetch("api/repaint", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
