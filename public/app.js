@@ -629,7 +629,7 @@ async function renderOnly(payload, prompt, started) {
     ms: performance.now() - started,
   };
   showResult({ plan: state.last.plan, svg: res.svg, meta }, prompt);
-  saveHistory({ plan: state.last.plan, svg: res.svg, meta }, prompt);
+  saveHistorySafe({ plan: state.last.plan, svg: res.svg, meta }, prompt);
 }
 
 async function runGeneratePipeline(payload, prompt, started) {
@@ -671,11 +671,14 @@ async function runGeneratePipeline(payload, prompt, started) {
   // Show the deterministic base image while optional stages refine it. The
   // download buttons stay hidden until the whole pipeline finishes.
   let svg = await render();
+  const baseSvg = svg;
+  let stageRendered = false;
   const willCritique = state.vision && meta.mode === "llm";
   const willDetail = Boolean(payload.detail) && meta.mode === "llm";
   const willEnhance = willCritique || willDetail;
   if (willEnhance) {
     state.reviewLabel = willCritique ? "评审中" : "补充细节中";
+    stageRendered = true;
     showResult(
       { plan, svg, meta: { ...meta, ms: performance.now() - started } },
       prompt,
@@ -757,9 +760,9 @@ async function runGeneratePipeline(payload, prompt, started) {
   if (cost) meta.cost = cost;
   meta.variant = payload.variant;
   meta.ms = performance.now() - started;
-  stopPaintAnimation();
-  showResult({ plan, svg, meta }, prompt);
-  saveHistory({ plan, svg, meta }, prompt);
+  const keepStage = stageRendered && svg === baseSvg;
+  showResult({ plan, svg, meta }, prompt, { keepStage });
+  saveHistorySafe({ plan, svg, meta }, prompt);
 }
 
 async function generate({ forceNew = false } = {}) {
@@ -850,7 +853,7 @@ async function generate({ forceNew = false } = {}) {
       if (!isSafeSvg(data.svg)) throw new Error("生成的 SVG 未通过安全检查");
       if (data.meta && Number.isFinite(data.meta.variant)) state.variant = data.meta.variant;
       showResult(data, prompt);
-      saveHistory(data, prompt);
+      saveHistorySafe(data, prompt);
     } else if (!forceNew && renderOnlyChange && state.last && state.last.plan) {
       await renderOnly(payload, prompt, started);
     } else {
@@ -862,7 +865,6 @@ async function generate({ forceNew = false } = {}) {
     clearInterval(state.timer);
     state.timer = null;
     state.busy = false;
-    stopPaintAnimation();
     els.generate.disabled = state.locked;
     syncReferenceUi();
     els.stage.removeAttribute("aria-busy");
@@ -977,10 +979,13 @@ function stopPaintAnimation() {
   els.stage.classList.remove("is-painting");
 }
 
-function showResult(data, prompt, { pending = false, animate = false } = {}) {
+function showResult(data, prompt, { pending = false, animate = false, keepStage = false } = {}) {
   logComposition(data.plan, data.meta || {}, prompt);
-  els.stage.innerHTML = data.svg;
-  if (animate) startPaintAnimation();
+  if (!keepStage) {
+    stopPaintAnimation();
+    els.stage.innerHTML = data.svg;
+  }
+  if (animate && !keepStage) startPaintAnimation();
   els.meta.title = "";
   const meta = data.meta || {};
   const isReference = Boolean(meta.reference);
@@ -1119,6 +1124,7 @@ function logComposition(plan, meta, prompt) {
 }
 
 function showError(message) {
+  stopPaintAnimation();
   els.stage.innerHTML = "";
   const box = document.createElement("div");
   box.className = "error";
@@ -1258,6 +1264,14 @@ function saveHistory(data, prompt) {
     /* storage full: history is best-effort */
   }
   renderHistory(trimmed);
+}
+
+function saveHistorySafe(data, prompt) {
+  try {
+    saveHistory(data, prompt);
+  } catch (error) {
+    console.error("[lmbrush] history", error);
+  }
 }
 
 function renderHistory(list) {

@@ -19,12 +19,14 @@ const COMPACT_PROMPT = [
 ].join("\n");
 
 export class LLMError extends Error {
-  constructor(message, { retryable = false, status = 0, details = null } = {}) {
+  constructor(message, { retryable = false, status = 0, details = null, timeout = false, retryAfterMs = 0 } = {}) {
     super(message);
     this.name = "LLMError";
     this.retryable = retryable;
     this.status = status;
     this.details = details;
+    this.timeout = timeout;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -216,7 +218,7 @@ function describeEmpty(result, budget) {
 }
 
 export async function chat(cfg, body, options = {}) {
-  const { retries = 1, deadline = 0 } = options;
+  const { retries = 2, deadline = 0, retryBaseMs = 800 } = options;
   let lastError;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -229,8 +231,9 @@ export async function chat(cfg, body, options = {}) {
     } catch (error) {
       lastError = error;
       if (!error.retryable || attempt === retries) throw error;
-      const wait = 500 * (attempt + 1);
-      if (deadline && Date.now() + wait >= deadline) throw error;
+      const backoff = Math.min(5000, retryBaseMs * 2 ** attempt);
+      const wait = Math.max(Number(error.retryAfterMs) || 0, backoff + Math.floor(Math.random() * 250));
+      if (deadline && Date.now() + wait + 1000 >= deadline) throw error;
       await sleep(wait);
     }
   }
@@ -284,10 +287,11 @@ async function requestOnce(cfg, body, timeoutMs = cfg.timeoutMs) {
       const { response_format: _ignored, ...rest } = body;
       return requestOnce(cfg, rest, timeoutMs);
     }
-    throw new LLMError(`LLM 返回 ${response.status}`, {
+    throw new LLMError(httpErrorMessage(response.status, text), {
       retryable,
       status: response.status,
       details: truncate(text, 800),
+      retryAfterMs: parseRetryAfter(response.headers.get("retry-after")),
     });
   }
 
@@ -316,6 +320,32 @@ async function requestOnce(cfg, body, timeoutMs = cfg.timeoutMs) {
     keys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 10) : [],
     preview: truncate(text, 600),
   };
+}
+
+function httpErrorMessage(status, text) {
+  const raw = String(text || "").trim();
+  let detail = "";
+  try {
+    const payload = JSON.parse(raw);
+    detail = firstText(payload?.error?.message, payload?.error?.error?.message, payload?.message, payload?.error);
+  } catch {
+    /* not JSON; fall back to the first line */
+  }
+  if (!detail) detail = raw.split(/\r?\n/).find((line) => line.trim()) || "";
+  detail = String(detail).replace(/\s+/g, " ").trim();
+  return detail ? `LLM 返回 ${status}：${truncate(detail, 180)}` : `LLM 返回 ${status}`;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function parseRetryAfter(value) {
+  const seconds = Number(String(value ?? "").trim());
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(30000, seconds * 1000) : 0;
 }
 
 function extractContent(payload) {

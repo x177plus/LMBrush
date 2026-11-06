@@ -636,6 +636,14 @@ brush), the deterministic stroke seed, and the local planner's deterministic
 seed. The page increments `variant` on every generate, which bypasses the plan
 cache. API callers must increment `variant` themselves for a new composition.
 
+**“LLM returned 503” / “The request queue is full”**
+
+The upstream gateway is saturated; this is not a local env, region, or HTTP/2
+problem. The server makes up to three attempts (two exponential-backoff
+retries) for 429/5xx responses, then falls back; `meta.llmErrors` keeps the
+upstream body. If it persists, switch model or channel, raise the proxy quota,
+or use another provider.
+
 **“LLM response missing content” / automatic fallback**
 
 Reasoning models can spend the entire completion budget on hidden reasoning,

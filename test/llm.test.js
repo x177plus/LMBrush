@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { generate, clearCache } from "../server/generate.js";
-import { buildMessages, llmConfig } from "../server/llm.js";
+import { buildMessages, llmConfig, chat } from "../server/llm.js";
 import { getStylePack } from "../server/style-packs.js";
 import { planFromPrompt } from "../core/local-planner.js";
 
@@ -339,5 +339,46 @@ test("reports cost from configured token prices", async () => {
   } finally {
     restore("LLM_PRICE_INPUT", previous.input);
     restore("LLM_PRICE_OUTPUT", previous.output);
+  }
+});
+
+test("retries a saturated upstream and reports its message", async () => {
+  let calls = 0;
+  const server = createServer((req, res) => {
+    calls++;
+    req.resume();
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      error: { message: "***.ServiceUnavailableError: The request queue is full.", type: "503", code: 503 },
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  try {
+    await assert.rejects(
+      () => chat(
+        {
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          model: "mock",
+          apiKey: "",
+          timeoutMs: 5000,
+          jsonMode: false,
+          temperature: 0,
+        },
+        { model: "mock", messages: [{ role: "user", content: "hi" }], max_tokens: 10 },
+        { retries: 2, retryBaseMs: 1 }
+      ),
+      (error) => {
+        assert.equal(error.status, 503);
+        assert.match(error.message, /503/);
+        assert.match(error.message, /request queue is full/i);
+        assert.match(error.details, /queue is full/i);
+        return true;
+      }
+    );
+    assert.equal(calls, 3);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
   }
 });
