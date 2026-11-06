@@ -16,7 +16,7 @@ browser-native ES modules.
 
 ![An oil painting of a ginger cat on a windowsill under a starry sky](docs/images/hero-cat.jpg)
 
-<p align="center"><sub>Actual output — “A ginger cat sitting on a windowsill, starry sky outside.” Classic brush, 3,419 strokes.</sub></p>
+<p align="center"><sub>Actual output — “A ginger cat sitting on a windowsill, starry sky outside.” Classic brush.</sub></p>
 
 ## Highlights
 
