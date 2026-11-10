@@ -34,7 +34,10 @@ const state = {
   localHint: "",
   referenceHint: "",
   referenceLocalHint: "",
+  referenceInterpretHint: "",
+  referenceHybridHint: "",
   reference: null,
+  referenceMode: "hybrid",
   referenceBusy: false,
   sourcePrompt: "",
   enriched: false,
@@ -69,6 +72,9 @@ const els = {
   detailSwitch: $("#detailSwitch"),
   detailToggle: $("#detailToggle"),
   detailText: $("#detailText"),
+  faithfulSwitch: $("#faithfulSwitch"),
+  faithfulToggle: $("#faithfulToggle"),
+  faithfulText: $("#faithfulText"),
   promptLabel: $("#promptLabel"),
   generateLabel: $("#generateLabel"),
   reference: $("#reference"),
@@ -142,6 +148,24 @@ function init() {
     state.paintStyle = button.dataset.paintStyle;
     markPressed(els.paintStyleGroup, button);
   });
+  els.faithfulToggle.addEventListener("change", () => {
+    if (state.busy || state.referenceBusy) {
+      els.faithfulToggle.checked = state.referenceMode === "faithful";
+      return;
+    }
+    if (!els.faithfulToggle.checked && !state.vision) {
+      els.faithfulToggle.checked = true;
+      return;
+    }
+    state.referenceMode = els.faithfulToggle.checked ? "faithful" : "hybrid";
+    resetVariant();
+    syncReferenceControls();
+    syncReferenceUi();
+    if (state.reference && !state.busy) {
+      els.hint.classList.remove("warn");
+      els.hint.textContent = referenceHintForMode() || "";
+    }
+  });
   els.detailToggle.addEventListener("change", () => {
     state.detail = els.detailToggle.checked;
     syncDetailToggle();
@@ -188,6 +212,7 @@ function init() {
   els.removeReference.addEventListener("click", () => {
     if (state.busy) return;
     state.reference = null;
+    state.referenceMode = "hybrid";
     resetVariant();
     syncReferenceUi();
     els.hint.classList.remove("warn");
@@ -217,13 +242,16 @@ async function checkHealth() {
     const data = await response.json();
     state.llm = Boolean(data.llm && data.llm.configured);
     state.vision = Boolean(data.vision && data.vision.configured);
-    const localReferenceHint = "参考图会在本地解析色彩区块再重绘；描述里的色调词（暖色调、冷色调、黑白、高对比、更亮等）会整体调色，构图保持不变。";
-    state.referenceLocalHint = state.vision
-      ? `${localReferenceHint} 切到“自动”或“只用 LLM”可用视觉模型理解更自由的说法。`
-      : `${localReferenceHint} 配置 VISION_MODEL 可启用视觉解析。`;
+    state.referenceLocalHint = "忠实复刻完全本地运行：笔触颜色和边缘直接来自参考图像素，不调用 LLM。";
     state.referenceHint = state.vision
-      ? "参考图先由视觉模型解析主体，再按参考图的颜色和构图重绘；描述可以整体调色（暖/冷、黑白、明暗、饱和度、色相），构图保持不变。"
+      ? "忠实复刻由参考图像素直接导引笔触，不经过 LLM 计划；视觉模型只额外解析标题、说明和调色。"
       : state.referenceLocalHint;
+    state.referenceInterpretHint = state.vision
+      ? "纯 LLM 重构：视觉模型重新生成分层计划并做 focus 局部增强，再交给同一套笔触渲染；更自由，但和参考图的差距更大。"
+      : "纯 LLM 重构需要配置 VISION_MODEL。";
+    state.referenceHybridHint = state.vision
+      ? "混合重构：LLM 计划驱动全图结构和颜色，参考图以约 35% 权重补充颜色和细节；比纯计划更接近参考图。"
+      : "混合重构需要配置 VISION_MODEL。";
     if (els.enrich) {
       els.enrich.hidden = !state.llm;
       els.enrich.title = state.llm
@@ -264,8 +292,10 @@ async function checkHealth() {
   } catch {
     state.llm = false;
     state.vision = false;
-    state.referenceHint = "参考图会在本地解析色彩区块，再按笔触重绘；描述里的常见色调词会整体调色，构图不变。";
-    state.referenceLocalHint = state.referenceHint;
+    state.referenceHint = "忠实复刻由参考图像素直接导引笔触，完全本地运行；混合/纯 LLM 重构需要配置 VISION_MODEL。";
+    state.referenceLocalHint = "忠实复刻完全本地运行：笔触颜色和边缘直接来自参考图像素，不调用 LLM。";
+    state.referenceInterpretHint = "纯 LLM 重构需要配置 VISION_MODEL。";
+    state.referenceHybridHint = "混合重构需要配置 VISION_MODEL。";
     if (els.enrich) els.enrich.hidden = true;
     setStatus("error", "服务不可用");
   }
@@ -277,6 +307,9 @@ function setStatus(kind, text) {
 }
 
 function referenceHintForMode() {
+  if (!state.reference) return "";
+  if (state.referenceMode === "hybrid") return state.referenceHybridHint;
+  if (state.referenceMode === "interpret") return state.referenceInterpretHint;
   return els.mode.value === "local" ? state.referenceLocalHint : state.referenceHint;
 }
 
@@ -462,6 +495,9 @@ function hashBytes(bytes) {
 function syncReferenceUi() {
   const reference = state.reference;
   const busy = state.busy || state.referenceBusy;
+  syncReferenceControls();
+  const reconstruct = Boolean(reference) && state.referenceMode !== "faithful";
+  const hybrid = Boolean(reference) && state.referenceMode === "hybrid";
   if (reference) {
     els.referenceDrop.hidden = true;
     els.referencePicked.hidden = false;
@@ -470,9 +506,11 @@ function syncReferenceUi() {
     }
     els.referenceName.textContent = reference.name;
     els.referenceSize.textContent = `${reference.width} × ${reference.height} 像素`;
-    els.promptLabel.textContent = "描述（可选）";
-    els.prompt.placeholder = "可选：说明重点，或调色（暖色调 / 黑白 / 更亮 / 低饱和）";
-    els.generateLabel.textContent = "重绘参考图";
+    els.promptLabel.textContent = reconstruct ? "重构意图（可选）" : "描述（可选）";
+    els.prompt.placeholder = reconstruct
+      ? "可选：说明保留什么、改变什么，例如“保留人物和构图，改成黄昏色调，笔触更概括”"
+      : "可选：说明重点，或调色（暖色调 / 黑白 / 更亮 / 低饱和）";
+    els.generateLabel.textContent = hybrid ? "混合重构" : reconstruct ? "参考重构" : "重绘参考图";
   } else {
     els.referenceDrop.hidden = false;
     els.referencePicked.hidden = true;
@@ -483,7 +521,6 @@ function syncReferenceUi() {
   els.referenceInput.disabled = busy;
   els.removeReference.disabled = busy || !reference;
   els.reference.classList.toggle("busy", busy);
-  syncReferenceControls();
   if (!busy) syncVariant();
 }
 
@@ -491,22 +528,59 @@ function syncReferenceUi() {
  * options; a reference repaint takes its colours from the image. Disable them
  * instead of silently ignoring the controls. */
 function syncReferenceControls() {
-  const referenceMode = Boolean(state.reference);
+  const hasReference = Boolean(state.reference);
+  const busy = state.busy || state.referenceBusy;
+
+  // Reference reconstruction needs a multimodal model; fall back to faithful
+  // if a restored history item selected it before health reported vision off.
+  if (hasReference && !state.vision) state.referenceMode = "faithful";
+  if (hasReference && state.referenceMode !== "faithful" && state.referenceMode !== "hybrid") {
+    state.referenceMode = "hybrid";
+  }
+  const faithful = state.referenceMode === "faithful";
+  const reconstruct = hasReference && !faithful;
+
+  if (els.faithfulSwitch) {
+    els.faithfulSwitch.hidden = !hasReference;
+    els.faithfulToggle.checked = faithful;
+    els.faithfulToggle.disabled = busy || (hasReference && !state.vision);
+    els.faithfulSwitch.classList.toggle("disabled", els.faithfulToggle.disabled);
+    els.faithfulText.textContent = faithful ? "开启 · 不经过 LLM 计划" : "关闭 · 混合重构";
+    els.faithfulSwitch.title = hasReference && !state.vision
+      ? "参考重构需要配置 VISION_MODEL；当前只能忠实复刻（不经过 LLM 计划）"
+      : faithful
+        ? "忠实复刻：笔触颜色和边缘直接来自参考图像素，不经过 LLM 计划"
+        : "混合重构：LLM 计划驱动全图，参考图以较低权重补色；打开开关即可切回忠实复刻";
+  }
+  if (els.detailSwitch) els.detailSwitch.hidden = hasReference;
+
+  const localOption = els.mode.querySelector('option[value="local"]');
+  if (localOption) localOption.disabled = reconstruct;
+  if (reconstruct && els.mode.value === "local") {
+    els.mode.value = "auto";
+    if (state.detail) {
+      state.detail = false;
+      els.detailToggle.checked = false;
+    }
+  }
+
   const localMode = els.mode.value === "local";
   for (const button of els.styleGroup.querySelectorAll("button")) {
-    button.disabled = referenceMode;
+    button.disabled = hasReference;
   }
   if (els.pack) {
-    els.pack.disabled = referenceMode || localMode;
-    els.pack.title = referenceMode
-      ? "参考图重绘的配色来自图片；需要调色请在描述里说明（暖/冷、黑白、明暗等）"
+    els.pack.disabled = hasReference || localMode;
+    els.pack.title = hasReference
+      ? "参考图的配色来自图片或模型计划；需要调色请在描述里说明（暖/冷、黑白、明暗等）"
       : localMode ? "本地规则模式不读取配色包" : "";
   }
-  if (referenceMode) {
+  if (hasReference) {
+    if (state.detail) {
+      state.detail = false;
+      els.detailToggle.checked = false;
+    }
     els.detailToggle.disabled = true;
     els.detailSwitch.classList.add("disabled");
-    els.detailText.textContent = "参考图模式不支持";
-    els.detailToggle.title = "参考图由像素导引重绘，不需要局部细节补丁";
   } else {
     syncDetailToggle();
   }
@@ -785,6 +859,7 @@ async function generate({ forceNew = false } = {}) {
   const samePlanInputs = Boolean(state.last)
     && state.last.prompt === prompt
     && state.last.referenceKey === referenceKey
+    && (state.last.referenceMode || "faithful") === state.referenceMode
     && state.last.style === state.style
     && state.last.mode === els.mode.value
     && state.last.stylePack === state.stylePack
@@ -823,6 +898,7 @@ async function generate({ forceNew = false } = {}) {
       ? {
           prompt,
           mode: els.mode.value,
+          referenceMode: state.referenceMode,
           paintStyle: state.paintStyle,
           brush: state.brush,
           variant: state.variant,
@@ -989,15 +1065,33 @@ function showResult(data, prompt, { pending = false, animate = false, keepStage 
   els.meta.title = "";
   const meta = data.meta || {};
   const isReference = Boolean(meta.reference);
+  const referenceMode = meta.referenceMode || "faithful";
+  const interpret = isReference && referenceMode === "interpret";
+  const hybrid = isReference && referenceMode === "hybrid";
+  const reconstruct = interpret || hybrid;
   const bits = [meta.render === "paint"
     ? (meta.paintStyle === "blockin" ? "油画 · 色块铺陈" : "油画 · 经典笔触")
     : "扁平"];
   if (meta.strokes) bits.push(`${meta.strokes} 笔 · ${brushLabel(meta.brush)}`);
   if (isReference) {
-    bits.push(`参考图 · ${meta.reference.regions || 0} 色块`);
-    if (meta.analysisCached) bits.push("解析缓存");
-    else if (meta.mode === "llm") bits.push("AI 解析");
-    if (meta.focusStrokes) bits.push(`主体细节 ${meta.focusStrokes} 笔`);
+    if (reconstruct) {
+      bits.push(hybrid ? "混合重构" : "参考重构");
+      if (meta.reference.planSource === "pixel") {
+        bits.push(`回退忠实复刻 · ${meta.reference.regions || 0} 色块`);
+      } else {
+        bits.push(`AI 计划 · ${meta.reference.regions || 0} 图元`);
+        if (hybrid) {
+          bits.push(`参考混合 ${Math.round((meta.reference.blend || 0.35) * 100)}%`);
+        }
+        if (meta.reference.canvasAdjusted) bits.push("画幅适配");
+      }
+      if (meta.planCached) bits.push("计划缓存");
+    } else {
+      bits.push(`忠实复刻 · ${meta.reference.regions || 0} 色块`);
+      bits.push("像素导引");
+      if (meta.analysisCached) bits.push("解析缓存");
+      else if (meta.mode === "llm") bits.push("AI 解析");
+    }
     const toneLabel = describeTone(meta.tone, meta.toneSource);
     if (toneLabel) bits.push(toneLabel);
   }
@@ -1011,18 +1105,20 @@ function showResult(data, prompt, { pending = false, animate = false, keepStage 
       if (meta.detail.reason) els.meta.title = meta.detail.reason;
     }
   }
-  bits.push(meta.mode === "llm"
-    ? `${isReference ? "视觉解析" : "LLM"}${meta.model ? ` · ${meta.model}` : ""}`
-    : (isReference ? "本地色彩解析" : "本地规则"));
-  if (meta.variant) bits.push(`变体 ${meta.variant}`);
-  if (meta.stylePack) bits.push(`配色 ${meta.stylePack}`);
-  if (isReference && Array.isArray(meta.reference.focusBoxes) && meta.reference.focusBoxes.length) {
-    const labels = meta.reference.focusBoxes.map((box) => box.label).filter(Boolean).join("、");
-    if (labels) {
-      const focusTitle = `视觉解析重点：${labels}`;
-      els.meta.title = els.meta.title ? `${els.meta.title}\n${focusTitle}` : focusTitle;
+  if (meta.refine && meta.refine.requested) {
+    if (meta.refine.applied) {
+      bits.push(`精细增强 ${meta.refine.regions || 0} 区 · +${meta.refine.elements || 0} 图元`);
+      if (meta.refine.failed) bits.push(`${meta.refine.failed} 区失败`);
+    } else if (meta.refine.reason) {
+      const refineTitle = `精细增强未应用：${meta.refine.reason}`;
+      els.meta.title = els.meta.title ? `${els.meta.title}\n${refineTitle}` : refineTitle;
     }
   }
+  bits.push(meta.mode === "llm"
+    ? `${hybrid ? "混合重构" : interpret ? "视觉重构" : isReference ? "视觉解析" : "LLM"}${meta.model ? ` · ${meta.model}` : ""}`
+    : (reconstruct ? "本地回退" : isReference ? "本地色彩解析" : "本地规则"));
+  if (meta.variant) bits.push(`变体 ${meta.variant}`);
+  if (meta.stylePack) bits.push(`配色 ${meta.stylePack}`);
   if (meta.critique) {
     if (Number.isFinite(meta.critique.score)) {
       bits.push(`评审 ${meta.critique.score}${meta.critique.repaired ? "*" : ""}`);
@@ -1062,7 +1158,11 @@ function showResult(data, prompt, { pending = false, animate = false, keepStage 
   } else {
     els.hint.classList.remove("warn");
     els.hint.textContent = (isReference
-      ? (meta.mode === "llm" ? state.referenceHint : state.referenceLocalHint)
+      ? (hybrid
+        ? state.referenceHybridHint
+        : interpret
+          ? state.referenceInterpretHint
+          : (meta.mode === "llm" ? state.referenceHint : state.referenceLocalHint))
       : (meta.mode === "llm" ? state.baseHint : state.localHint))
       || "已生成。计划 JSON 可展开查看或复制。";
   }
@@ -1085,6 +1185,7 @@ function showResult(data, prompt, { pending = false, animate = false, keepStage 
     prompt,
     referenceKey: state.reference ? state.reference.key : "",
     reference: isReference,
+    referenceMode: meta.referenceMode || state.referenceMode,
     style: state.style,
     mode: els.mode.value,
     stylePack: state.stylePack,
@@ -1196,9 +1297,7 @@ function formatUSD(value) {
 }
 
 function brushLabel(value) {
-  const scale = Number(value) || 1;
-  if (scale < 0.36) return "纤毫";
-  if (scale < 0.6) return "极细";
+  const scale = Math.max(0.8, Number(value) || 1);
   if (scale < 0.9) return "细腻";
   if (scale > 1.2) return "粗犷";
   return "标准";
@@ -1249,6 +1348,7 @@ function saveHistory(data, prompt) {
     title,
     reference: Boolean(state.reference),
     referenceKey,
+    referenceMode: state.referenceMode,
     style: state.style,
     paintStyle: state.paintStyle,
     brush: state.brush,
@@ -1314,10 +1414,12 @@ function restore(item) {
     if (button) markPressed(els.paintStyleGroup, button);
   }
   if (item.brush) {
-    state.brush = item.brush;
     const button = [...els.brushGroup.querySelectorAll("button")]
       .find((candidate) => Number(candidate.dataset.brush) === item.brush);
-    if (button) markPressed(els.brushGroup, button);
+    if (button) {
+      state.brush = item.brush;
+      markPressed(els.brushGroup, button);
+    }
   }
   state.detail = Boolean(item.detail);
   els.detailToggle.checked = state.detail;
@@ -1328,6 +1430,10 @@ function restore(item) {
       .find((candidate) => candidate.dataset.style === item.style);
     if (button) markPressed(els.styleGroup, button);
   }
+  if (item.referenceMode) {
+    state.referenceMode = item.referenceMode;
+  }
+  syncReferenceUi();
   state.last = {
     svg: item.svg,
     plan: item.plan,
@@ -1335,6 +1441,7 @@ function restore(item) {
     prompt: item.prompt,
     referenceKey: state.reference ? state.reference.key : "",
     reference: Boolean(item.reference),
+    referenceMode: item.referenceMode || "faithful",
     style: state.style,
     mode: els.mode.value,
     stylePack: state.stylePack,

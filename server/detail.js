@@ -38,6 +38,7 @@ export async function enrichPlanWithDetails({
   stylePack = null,
   cfg,
   focus = [],
+  image = null,
   deadline = 0,
 }) {
   const { targets, focusSource } = resolveTargets(plan, focus);
@@ -58,7 +59,7 @@ export async function enrichPlanWithDetails({
 
   const results = await Promise.all(targets.map(async (target) => {
     try {
-      const patch = await requestPatch({ plan, target, prompt, style, stylePack, cfg, deadline });
+      const patch = await requestPatch({ plan, target, prompt, style, stylePack, cfg, image, deadline });
       return { target, elements: patch.elements, usage: patch.usage, error: null };
     } catch (error) {
       return { target, elements: [], usage: error.usage || zeroUsage(), error };
@@ -113,7 +114,7 @@ export async function enrichPlanWithDetails({
   };
 }
 
-async function requestPatch({ plan, target, prompt, style, stylePack, cfg, deadline = 0 }) {
+async function requestPatch({ plan, target, prompt, style, stylePack, cfg, image = null, deadline = 0 }) {
   const { w, h } = plan.canvas;
   const minFeature = minFeatureFor(plan);
   const user = [
@@ -121,6 +122,7 @@ async function requestPatch({ plan, target, prompt, style, stylePack, cfg, deadl
     `画布：${w}×${h}，背景 ${plan.canvas.background}`,
     style && style !== "auto" ? `风格：${style}` : "",
     stylePack ? formatStylePack(stylePack) : "",
+    image ? "参考图：已附上原图。只补充图片中确实可见的结构，不要凭想象编造。" : "",
     `目标物体：${target.id}`,
     `目标框（全局坐标）：x=${round(target.box.x1)} y=${round(target.box.y1)} w=${round(target.box.w)} h=${round(target.box.h)}`,
     `最小特征尺寸：${minFeature}px`,
@@ -129,9 +131,15 @@ async function requestPatch({ plan, target, prompt, style, stylePack, cfg, deadl
     `只输出 {"elements":[...]}，最多 ${MAX_PATCH_ELEMENTS} 个图元。`,
   ].filter(Boolean).join("\n");
 
+  const content = image
+    ? [
+        { type: "text", text: user },
+        { type: "image_url", image_url: { url: String(image) } },
+      ]
+    : user;
   const messages = [
     { role: "system", content: DETAIL_PROMPT },
-    { role: "user", content: user },
+    { role: "user", content },
   ];
   const baseBody = {
     ...cfg.extraBody,

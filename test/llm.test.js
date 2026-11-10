@@ -124,6 +124,22 @@ test("compact output can be disabled in the planner prompt", () => {
   assert.equal(llmConfig(base).reasoningEffort, "");
 });
 
+test("reference plans attach the image and canvas to the plan prompt", () => {
+  const messages = buildMessages("参考图重构", "auto", 0, null, {
+    instructions: "理解参考图，不要逐像素描摹。",
+    image: "data:image/png;base64,AAAA",
+    canvas: { w: 1000, h: 667 },
+    compact: true,
+  });
+  assert.ok(Array.isArray(messages[1].content));
+  const [text, image] = messages[1].content;
+  assert.equal(text.type, "text");
+  assert.match(text.text, /不要逐像素描摹/);
+  assert.match(text.text, /1000×667/);
+  assert.equal(image.type, "image_url");
+  assert.equal(image.image_url.url, "data:image/png;base64,AAAA");
+});
+
 test("uses the LLM plan when it validates", async () => {
   let calls = 0;
   await withLLM(() => {

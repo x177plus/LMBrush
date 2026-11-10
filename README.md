@@ -25,14 +25,16 @@ browser-native ES modules.
   repaired once or rejected before it can reach the renderer.
 - **Two oil-painting styles.** *Classic brush* builds layers from underpaint to
   fine detail; *block-in* starts from a few oversized colour fields and refines
-  them. Five brush sizes, from hairline to bold.
+  them. Three brush sizes, from fine detail to bold.
 - **No model required.** Without an LLM the built-in rule-based planner still
   covers common subjects: people, animals, landscapes, cities, night skies,
   flowers and abstract compositions.
-- **Reference-image repaint.** Upload a picture; the browser decodes it and
-  sends raw RGB. The server builds a pixel guide and repaints it with the same
-  brush engine. An optional vision model adds a subject box, title and global
-  tone grading.
+- **Reference-image repaint, two page modes plus an API experiment.** Upload a
+  picture; the browser decodes it and sends raw RGB. *Hybrid* (default) blends
+  the LLM plan guide with 35% reference pixels, so the model drives the whole
+  image while the reference supplies colour/detail. *Faithful* uses the pixel
+  guide directly and skips the LLM plan. API callers can also request a
+  plan-only `interpret` reconstruction.
 - **Optional vision critique.** A multimodal model scores a 384 px preview of
   the plan and can trigger one repair pass. Failures never block the image.
 - **Prompt enrichment and detail patches.** Expand a short prompt into a richer
@@ -40,7 +42,7 @@ browser-native ES modules.
 - **Zero runtime dependencies.** Hand-written rasteriser, PNG encoder, SVG
   path validator, HTTP server and Vercel adapter. `npm install` is not needed.
 - **Deterministic and testable.** The same plan and brush settings always
-  produce the same strokes. 146 `node:test` cases cover the pipeline.
+  produce the same strokes. 155 `node:test` cases cover the pipeline.
 
 ## Gallery
 
@@ -55,12 +57,11 @@ browser-native ES modules.
   </tr>
   <tr>
     <td><img src="docs/images/gallery-desert.jpg" alt="Block-in painting of red desert rocks at sunset"><br><sub><b>Block-in</b> · 912 strokes · “Red rocks and a setting sun in the desert, minimalist composition.”</sub></td>
-    <td><img src="docs/images/gallery-forest.jpg" alt="Fine-brush forest floor with mushrooms and ferns"><br><sub><b>Fine brush (0.45)</b> · 13,011 strokes · “A forest after rain: moss, ferns and mushrooms, close-up.”</sub></td>
   </tr>
 </table>
 
 Every image above is a real, unedited output. The sailboat, valley and fox were
-rendered by the local planner; the cat, lighthouse, desert and forest used LLM
+rendered by the local planner; the cat, lighthouse and desert used LLM
 plans. The SVG files are the product; the JPEGs here are browser-side
 rasterisations for this README.
 
@@ -133,15 +134,15 @@ through `/api/generate` (`"render": "flat"`).
 
 | Mode | Brush value | What it does | 1000×1000 output |
 |---|---|---|---|
+| Classic, fine-detail | `0.8` | Same four layers at 80% stroke width and spacing | ~4,500–5,500 strokes, ~800–950 KB |
 | Classic | `1` | Four layers: blunt underpaint → large mass → shaping → detail | ~3,000–3,700 strokes, ~550–600 KB |
-| Classic, fine | `0.45` | Adds a `micro` layer that only paints detected edges | ~11,000–12,000 strokes, ~2 MB |
-| Classic, hairline | `0.3` | Shrinks the whole chain again for close-up detail | ~16,000–17,000 strokes, ~3 MB |
+| Classic, bold | `1.35` | Same four layers with broader marks | ~1,600–2,000 strokes, ~300–380 KB |
 | Block-in | `1` | 1–3 oversized colour fields, then progressive refinement | ~800–1,500 strokes, ~150–260 KB |
 
-Classic brush starts from a 192 px colour/lightness guide; block-in uses 256 px;
-fine brushes use 384 px (up to 640 px) and hairline 512 px (up to 768 px).
-Colours are sampled bilinearly from the guide and nudged in HSL (±2° hue,
-±4% saturation, ±4% lightness), so adjacent strokes always differ slightly.
+Classic brush starts from a 192 px colour/lightness guide; block-in uses 256 px.
+Colours are averaged from a 3×3 neighbourhood of the guide and nudged in HSL
+(±2° hue, ±4% saturation, ±4% lightness), so adjacent strokes always differ
+slightly.
 Stroke direction follows the local gradient; flat areas fall back to one flow.
 
 The picture is 100% brush polygons — there is no background rectangle.
@@ -152,33 +153,116 @@ Upload a PNG, JPEG, WebP or GIF; describe the result if you like. The browser
 decodes and scales the image, then sends raw RGB bytes (`width × height × 3`,
 base64). Nothing is written to disk and the original file is never uploaded.
 
+After a reference is uploaded, the **Enrich details** switch in the brush-style
+row is replaced by a **Faithful** switch:
+
+- **Switch off** (default, `referenceMode: "hybrid"`): the LLM plan drives the
+  whole image, while the reference pixels are blended into the guide at about
+  35%. Composition and occlusion still come from the model; the reference
+  image contributes colour and detail everywhere.
+- **Switch on**: faithful repaint. Strokes sample the original pixels;
+  composition and colour come from the image, not from a model-written plan.
+  `mode=local` makes no model call. In short: faithful repaint basically does
+  not go through the LLM.
+
+The page does not expose a pure-LLM option. API callers can still send
+`referenceMode: "interpret"` for a plan-only experiment.
+
 ```mermaid
 flowchart LR
   R["Reference image<br/>+ optional prompt"] --> D["Browser decode<br/>long side ≤512 px<br/>raw RGB"]
   D --> P["/api/repaint"]
-  P --> A{"Vision model configured<br/>and mode ≠ local?"}
-  A -->|yes| V["Title / caption / subject boxes / tone"]
-  A -->|no or failed| L["Local colour-region analysis"]
-  V --> T["Global tone grading<br/>warmth / saturation / brightness / contrast / hue"]
-  L --> T
-  T --> G["Pixel guide + colour-block plan"]
-  G --> S["Classic or block-in strokes"]
+  P --> M{"referenceMode"}
+  M -->|faithful| G["Pixel guide + colour-block plan"]
+  G --> O["Optional vision<br/>title / boxes / tone"]
+  M -->|hybrid| H["LLM plan guide<br/>+ 35% reference blend"]
+  H --> J["normalize + validate"]
+  O --> S["Same brush renderer"]
+  J --> S
 ```
+
+### Faithful (switch on)
 
 - The server splits the image into at most 60 colour regions for an inspectable
   plan, but actual strokes sample the **original pixels**. The plan is a
-  summary, not a mosaic ceiling.
+  summary, not a mosaic ceiling, and is not authored by the LLM.
 - `mode`: `auto` (vision first, local fallback), `llm` (require vision, 502 on
   failure), `local` (no model call).
 - `tone` is a global grade — warmth, saturation, brightness, contrast and hue
   rotation. It changes colour, never composition or stroke structure.
-- Subject boxes from the vision model add up to 700 extra detail strokes
-  inside the box (500 for block-in).
-- Limits: long side ≤512 px after browser scaling, aspect ratio 1:7.5–7.5:1,
-  raw image dimensions 8–768 px, request body ≤4 MB. The page additionally
-  rejects files over 20 MB and images over 40 megapixels before decoding.
 - Analysis results are cached in memory by image hash + prompt + vision model
-  (12 entries). Re-uploading is required to repaint later.
+  (12 entries). Switching brush style or size re-renders without another call.
+
+### Hybrid (switch off, default)
+
+- Request `referenceMode: "hybrid"`. The vision model reads the 384 px image
+  and returns a 6–10 layer, 60–90 base-element plan plus 1–2 `focus` layers.
+  `refine` defaults to on and adds 4–12 focus detail elements per region.
+- Rendering keeps the reference aspect ratio: the plan is rasterised to a
+  512 px guide and the reference image is sampled as a second guide. The final
+  guide is **65% LLM plan + 35% reference pixels**, so the model controls the
+  whole image and the reference supplies colour/detail everywhere.
+- Stroke colour samples the blended guide. Stroke direction comes from the plan
+  guide but is clamped to a narrow band (about ±20°) around one flow direction,
+  so small plan edges and reference texture cannot flip strokes to unrelated
+  angles. There is no separate fine-stroke pass for focus regions.
+- Hybrid deliberately skips local `tone` grading so the plan/reference colours
+  are not shifted twice; tone requests are handled by the plan prompt.
+- Plan failures fall back like pure LLM: `auto` retries faithful pixel
+  painting, `llm` returns 502, `local` returns 400.
+- Plans are cached by image hash + prompt + vision model + variant + refine +
+  `referenceMode`. Brush changes re-render only.
+- It is still a painting: grid sampling and oil strokes preserve plan
+  composition, reference colour and plan detail, but not every source pixel.
+  Use faithful mode for maximum likeness.
+
+### Pure LLM reconstruction (API-only, not in the page)
+
+- The server first computes the canvas aspect ratio and an 8–10 colour palette
+  locally, then sends the 384 px image, palette and prompt to `VISION_MODEL`.
+- The model returns a normal plan JSON (6–10 layers requested, 60–90 base
+  elements, hard cap 160) and marks 1–2 `focus` layers for local refinement.
+- When focus layers are present, the server runs one **image-aware local
+  detail pass**: the reference image plus the target layer's geometry/colours
+  go to the vision model, which adds 4–12 elements per focus region (eyes,
+  nose/mouth, leaf veins, window panes, seams, contact shadows) for up to two
+  regions. A failed pass keeps the base plan and records `meta.refine`; send
+  `refine:false` to disable it.
+- The server keeps the reference aspect ratio: if the model used a different
+  canvas, the plan is rasterised once at its own aspect and that guide is
+  remapped onto the reference frame, then `canvas` is rewritten to the target
+  size. The plan is validated and rendered exactly like a text-generated plan;
+  a square model canvas neither crops the composition nor leaves dead space.
+- Plans (including refinement) are cached by image hash + prompt + vision model
+  + variant + refine + `referenceMode`. Brush or style changes re-render
+  without another call.
+- `mode=auto` falls back to faithful pixel painting if the vision call or plan
+  validation fails, and records `meta.warning`; `mode=llm` returns 502;
+  `mode=local` cannot be combined with `interpret` or `hybrid` (400).
+- Fidelity is bounded by the plan format: 12 layers, 160 elements, 64 points
+  per polygon. The base plan plus local refinement keeps the subject,
+  composition, main palette and some key details, but text, hair and dense
+  texture are still lost. Use hybrid or faithful mode when likeness matters.
+- Pure LLM reconstruction runs as one `/api/repaint` request; it does not add
+  vision critique or repair. Refinement is a local patch pass, not a full
+  redraw. The **Enrich details** control stays hidden in reference mode.
+
+Both page modes ignore style presets and style packs. The manual **Enrich
+details** control is hidden in reference mode; hybrid and the API-only pure LLM
+run their own focus-layer detail pass, while hybrid also blends reference
+pixels into the guide. The description is a title/caption plus tone hint in
+faithful mode; in hybrid/pure LLM it is creative intent the model may use to
+change time of day, weather, palette or level of abstraction.
+
+### Shared limits
+
+- Long side ≤512 px after browser scaling, aspect ratio 1:7.5–7.5:1, raw image
+  dimensions 8–768 px, request body ≤4 MB. The page additionally rejects files
+  over 20 MB and images over 40 megapixels before decoding.
+- Original files are not stored; history keeps only the generated SVG, plan and
+  metadata.
+- Vision analysis/reconstruction results are in-process (12 entries) and lost
+  on restart; re-uploading is required to regenerate later.
 
 ## Detail enrichment
 
@@ -363,8 +447,9 @@ directions.
 
 ```json
 {
-  "prompt": "optional title or caption",
+  "prompt": "optional title, caption or reconstruction intent",
   "mode": "auto",
+  "referenceMode": "hybrid",
   "paintStyle": "classic",
   "brush": 1,
   "variant": 0,
@@ -374,11 +459,22 @@ directions.
 
 `image.data` is raw RGB, not a file: `w × h × 3` bytes, row-major. A
 `data:image/...;base64,` prefix is tolerated, but the server does not decode
-PNG/JPEG. `mode` is `auto`, `llm` or `local`; `paintStyle` is `classic` or
-`blockin`; `brush` is 0.3–1.8; `variant` is 0–999. Style packs, presets and
-detail enrichment are ignored in this mode. The response has the same shape as
-`/api/generate`, plus `meta.reference` (regions, subject boxes, analysis
-source), `meta.tone` and `meta.toneSource`.
+PNG/JPEG. `referenceMode` is `faithful` (API default for compatibility),
+`hybrid` (page default: LLM plan + 35% reference blend) or `interpret` (API-only
+plan-only experiment). `refine` defaults to `true` and adds one image-aware
+local detail pass on focus layers in `hybrid` and `interpret`; `faithful`
+ignores it. `mode` is `auto`, `llm` or `local`; `hybrid`/`interpret` cannot be
+combined with `local`. `paintStyle` is `classic` or `blockin`; `brush` is
+0.8–1.8; `variant` is 0–999. Style packs, presets and the `detail` option are
+ignored in this mode.
+
+Faithful responses include `meta.reference` (regions and analysis source),
+`meta.tone` and `meta.toneSource`. Hybrid/pure LLM responses include
+`meta.referenceMode`, `meta.reference.planSource` (`hybrid` or `llm`),
+`meta.reference.baseGuide` (`blend` or `plan`), `meta.reference.blend` for
+hybrid, `meta.reference.focusLayers`, `meta.reference.regions`, `meta.planMs`,
+`meta.planCached` and `meta.refine`. A failed reconstruction in `auto` returns
+the faithful pixel result with `meta.warning`; `mode=llm` returns 502.
 
 ### `POST /api/generate`
 
@@ -396,8 +492,7 @@ enabled.
 - `mode`: `auto` (LLM, fall back to local), `llm`, `local`
 - `render`: `paint` (default) or `flat` (API only)
 - `paintStyle`: `classic` or `blockin`
-- `brush`: `0.3` hairline, `0.45` fine, `0.8` fine-detail, `1` standard,
-  `1.35` bold
+- `brush`: `0.8` fine-detail, `1` standard, `1.35` bold
 - `detail`: enable local detail patches (LLM only, 1–2 extra calls)
 - `variant`: 0–999; increments bypass the cache and produce a new composition
 
@@ -447,8 +542,8 @@ as static output.
 Platform limits (Vercel docs, 2026-08):
 
 - Request and response bodies are capped at **4.5 MB**. A 1000 px classic
-  painting is ~550–600 KB of SVG; fine brush is ~2 MB and hairline ~3 MB.
-  Avoid the smallest brushes with many layers.
+  painting is ~550–600 KB of SVG; fine-detail is ~800–950 KB. Watch the limit
+  with many layers at the smallest brush.
 - Hobby functions run for at most **300 s**. The stepwise pipeline uses 260 s
   per step; `/api/repaint` uses 280 s internally.
 - **Set `DEMO_TOKEN` on public deployments.** Every POST can spend model
@@ -503,7 +598,7 @@ node eval/run.js --blockin  # evaluate block-in output
 
 `npm test` uses `scripts/hermetic-env.mjs` to strip inherited `LLM_*` and
 `VISION_*` variables, so a developer's `.env` cannot make tests order-dependent.
-The suite is 146 cases and runs in about 1.5 s on Node 24. CI runs it on Node
+The suite is 155 cases and runs in a few seconds on Node 24. CI runs it on Node
 20, 22, 24 and 26.
 
 The evaluation reports validity rate, average and P95 latency, average element
@@ -529,7 +624,7 @@ core/
 server/
   llm.js             OpenAI-compatible client, JSON extraction, repair loop
   generate.js        orchestration, caches, fallback, composition logs
-  reference.js       repaint orchestration, vision parsing, memory cache
+  reference.js       repaint orchestration, vision parsing/reconstruction, cache
   enrich.js          prompt enrichment (explicit user action)
   style-packs.js     pack loading, validation, prompt formatting
   vision.js          multimodal critique, score normalisation, repair
@@ -548,6 +643,7 @@ prompts/system.md    JSON protocol and technical constraints
 prompts/enrich.md    prompt-enrichment instructions
 prompts/critic.md    vision rubric
 prompts/reference.md reference-image analysis instructions
+prompts/reference-plan.md reference reconstruction plan instructions
 prompts/style-packs.json  palettes (derived from awesome-design-md, MIT)
 public/              single-page UI
 docs/images/         README screenshots
@@ -573,9 +669,19 @@ eval/                prompts and batch evaluation
   phrase are injected.
 - **Vision is optional.** It reads a 384 px flat preview; it is a gate, not part
   of generation. Bad scores can be ignored or repaired; failures keep the image.
-- **Reference images are not hallucinated.** Pixels drive composition and base
-  colours. The vision model only contributes title, caption, subject boxes and
-  tone. Wrong coordinates can misplace detail strokes; tone only changes colour.
+- **Faithful reference images are not hallucinated.** Pixels drive composition
+  and base colours. The vision model only contributes title, caption and tone;
+  tone only changes colour.
+- **Hybrid blends the plan guide with reference pixels.** The LLM plan drives
+  the whole composition; the reference image is blended into the guide at
+  about 35% for colour/detail. It is closer than pure plan mode while the
+  model still participates everywhere.
+- **Pure LLM reconstruction is plan-driven, not pixel-faithful.** The vision
+  model reads the image and writes the same plan format as text generation; the
+  server fixes the canvas aspect ratio and validates it before brush rendering.
+  It keeps the subject, composition skeleton and palette approximately. The
+  160-element plan cap is the fidelity ceiling; use hybrid or faithful mode for
+  likeness.
 - **The browser decodes images.** Node has no image codec, and adding one would
   break the zero-dependency promise. Only raw RGB bytes are uploaded.
 - **The local planner is a fallback.** It covers common subjects; long-tail
@@ -616,13 +722,25 @@ eval/                prompts and batch evaluation
   gradients.
 - Reference images are scaled to 512 px on the long side in the browser, so
   finer source detail never reaches the pixel guide.
-- Reference repaint does not semantically reconstruct the scene; it preserves
-  composition. Subject boxes only add local detail strokes.
-- Reference mode ignores style presets, style packs and detail enrichment.
-  Tone grading is global, not per-region.
-- Reference analysis is in-process (12 entries) and lost on restart; original
-  files are not stored. History keeps only the generated SVG, plan and
-  metadata.
+- Faithful repaint does not semantically reconstruct the scene; it preserves
+  composition.
+- Hybrid repaint blends a 512 px LLM plan guide with reference pixels at about
+  35%; the model drives the whole composition, while the reference contributes
+  colour/detail. It skips local tone grading and still uses oil strokes, so it
+  is not pixel-faithful.
+- Pure LLM repaint does reorganise the scene: the vision model writes a plan
+  with at most 12 layers / 160 elements, plus one focus-layer detail pass. It
+  keeps the subject, composition skeleton, main palette and some key details
+  approximately, but text, hair and texture can still be lost. It is not
+  pixel-faithful.
+- Reference modes ignore style presets and style packs. The manual **Enrich
+  details** control is disabled in all modes; hybrid and pure LLM use their own
+  focus-layer detail pass (`refine:false` disables it), while hybrid also blends
+  35% reference pixels into the guide. Faithful tone grading is global, not
+  per-region.
+- Reference analysis/reconstruction is in-process (12 entries) and lost on
+  restart; original files are not stored. History keeps only the generated SVG,
+  plan and metadata.
 - Reference inputs wider than 7.5:1, longer than 768 px per side or over 4 MB
   are rejected.
 
@@ -665,6 +783,12 @@ probably does not match OpenAI `/chat/completions`; check `LLM_BASE_URL`.
 One successful generation is one model call by default; vision makes it two and
 a repair makes it three. Token usage is roughly: system prompt 1–2k, hidden
 reasoning 3–5k, plan 2–3k; critique 1–2k; repair 3–4k; detail 1–3k per region.
+Reference reconstruction is a single vision call that emits a plan (roughly
+8–16k output tokens including hidden reasoning; cached by image + prompt +
+model + variant + refine + `referenceMode`), plus one optional focus-layer
+detail pass (roughly 1–3k tokens per region, at most two regions; skipped when
+the model marks no focus or `refine:false` is sent). Hybrid uses the same plan
+and detail pass, then blends 35% reference pixels into the render guide.
 `meta.usage` and, with prices configured, `meta.cost` report the exact numbers
 per step.
 

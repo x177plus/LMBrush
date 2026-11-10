@@ -188,6 +188,64 @@ test("the guide rasterizer samples plan colours", () => {
   assert.deepEqual(at(750, 500), [255, 255, 255]);
 });
 
+test("stroke direction can use a separate angle guide", () => {
+  const size = 64;
+  const solid = {
+    width: size,
+    height: size,
+    data: new Float32Array(size * size * 3).fill(128),
+    scaleX: size / plan.canvas.w,
+    scaleY: size / plan.canvas.h,
+  };
+  const gradient = (horizontal) => {
+    const data = new Float32Array(size * size * 3);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const value = 255 * ((horizontal ? x : y) / (size - 1));
+        const index = (y * size + x) * 3;
+        data[index] = value;
+        data[index + 1] = value;
+        data[index + 2] = value;
+      }
+    }
+    return { ...solid, data };
+  };
+  const horizontal = gradient(true);
+  const vertical = gradient(false);
+  const first = renderPainting(plan, {
+    guide: solid,
+    angleGuide: horizontal,
+    seed: "angle-guide",
+  });
+  const repeat = renderPainting(plan, {
+    guide: solid,
+    angleGuide: horizontal,
+    seed: "angle-guide",
+  });
+  const other = renderPainting(plan, {
+    guide: solid,
+    angleGuide: vertical,
+    seed: "angle-guide",
+  });
+  assert.equal(first.svg, repeat.svg);
+  assert.notEqual(first.svg, other.svg);
+
+  // A zero deviation budget collapses every gradient angle onto the flow.
+  const clamped = renderPainting(plan, {
+    guide: solid,
+    angleGuide: horizontal,
+    angleMaxDeviation: 0,
+    seed: "angle-guide",
+  });
+  const clampedOther = renderPainting(plan, {
+    guide: solid,
+    angleGuide: vertical,
+    angleMaxDeviation: 0,
+    seed: "angle-guide",
+  });
+  assert.equal(clamped.svg, clampedOther.svg);
+});
+
 test("brush scale trades stroke count for stroke size", () => {
   const fine = renderPainting(plan, { brushScale: 0.8 });
   const bold = renderPainting(plan, { brushScale: 1.35 });
@@ -196,25 +254,14 @@ test("brush scale trades stroke count for stroke size", () => {
   assert.ok(bold.svg.startsWith("<svg"));
 });
 
-test("ultra-fine brush raises guide resolution and adds micro detail", () => {
-  const fine = renderPainting(plan, { brushScale: 0.45 });
-  assert.equal(fine.guide.width, 384);
-  assert.ok(fine.strokes > painting.strokes * 3, `${fine.strokes} vs ${painting.strokes}`);
-  assert.ok(fine.passCounts.micro > 0);
-  assert.ok(fine.svg.length > painting.svg.length);
+test("removed hairline and ultra-fine values clamp to the fine-detail brush", () => {
+  const fine = renderPainting(plan, { brushScale: 0.8 });
+  assert.equal(fine.guide.width, 192);
+  assert.equal(fine.passCounts.micro, undefined);
+  // The removed 0.3 / 0.45 presets must not add a micro pass or a larger guide.
+  assert.equal(renderPainting(plan, { brushScale: 0.3 }).svg, fine.svg);
   assert.equal(renderPainting(plan, { brushScale: 0.45 }).svg, fine.svg);
-});
-
-test("hair-fine brush samples a 512px guide and paints denser micro strokes", () => {
-  const fine = renderPainting(plan, { brushScale: 0.45 });
-  const hair = renderPainting(plan, { brushScale: 0.3 });
-  assert.equal(hair.guide.width, 512);
-  assert.ok(hair.strokes > fine.strokes * 1.3, `${hair.strokes} vs ${fine.strokes}`);
-  assert.ok(hair.passCounts.micro > fine.passCounts.micro);
-  assert.ok(hair.svg.length > fine.svg.length);
-  assert.equal(renderPainting(plan, { brushScale: 0.3 }).svg, hair.svg);
-  // Below the minimum the renderer clamps to the hair brush instead of failing.
-  assert.equal(renderPainting(plan, { brushScale: 0.1 }).svg, hair.svg);
+  assert.equal(renderPainting(plan, { brushScale: 0.1 }).svg, fine.svg);
 });
 
 test("path flattening handles curves and arcs", () => {

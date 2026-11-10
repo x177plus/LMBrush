@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<meta name="description" content="把自然语言描述转成绘制计划，再由笔触渲染成 SVG 油画。支持参考图重绘、经典笔触与色块铺陈。">
+<meta name="description" content="把自然语言描述转成绘制计划，再由笔触渲染成 SVG 油画。支持参考图忠实复刻、参考重构、经典笔触与色块铺陈。">
 <title>LMBrush · 自然语言矢量画面</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -66,32 +66,13 @@
 
       <div class="field">
         <span class="label">画面风格</span>
-        <div class="segmented" id="styleGroup" role="group" aria-label="画面风格">
-          <button type="button" data-style="auto" class="on" aria-pressed="true">自动</button>
-          <button type="button" data-style="flat" aria-pressed="false">扁平</button>
-          <button type="button" data-style="line" aria-pressed="false">线稿</button>
-          <button type="button" data-style="gradient" aria-pressed="false">渐变</button>
-          <button type="button" data-style="minimal" aria-pressed="false">极简</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <span class="label">笔触大小</span>
-        <div class="segmented" id="brushGroup" role="group" aria-label="笔触大小">
-          <button type="button" data-brush="0.3" aria-pressed="false">纤毫</button>
-          <button type="button" data-brush="0.45" aria-pressed="false">极细</button>
-          <button type="button" data-brush="0.8" aria-pressed="false">细腻</button>
-          <button type="button" data-brush="1" class="on" aria-pressed="true">标准</button>
-          <button type="button" data-brush="1.35" aria-pressed="false">粗犷</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <span class="label">笔触风格</span>
         <div class="control-row">
-          <div class="segmented" id="paintStyleGroup" role="group" aria-label="笔触风格">
-            <button type="button" data-paint-style="classic" class="on" aria-pressed="true">经典笔触</button>
-            <button type="button" data-paint-style="blockin" aria-pressed="false">色块铺陈</button>
+          <div class="segmented" id="styleGroup" role="group" aria-label="画面风格">
+            <button type="button" data-style="auto" class="on" aria-pressed="true">自动</button>
+            <button type="button" data-style="flat" aria-pressed="false">扁平</button>
+            <button type="button" data-style="line" aria-pressed="false">线稿</button>
+            <button type="button" data-style="gradient" aria-pressed="false">渐变</button>
+            <button type="button" data-style="minimal" aria-pressed="false">极简</button>
           </div>
           <label class="switch" id="detailSwitch">
             <span class="switch-name">丰富细节</span>
@@ -99,6 +80,32 @@
             <span class="switch-track" aria-hidden="true"></span>
             <span class="switch-text" id="detailText">关闭 · 只生成一次</span>
           </label>
+          <label class="switch" id="faithfulSwitch" hidden
+            title="忠实复刻：笔触颜色和边缘直接来自参考图像素，不经过 LLM 计划">
+            <span class="switch-name">忠实复刻</span>
+            <input type="checkbox" id="faithfulToggle">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-text" id="faithfulText">关闭 · 混合重构</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <span class="label">笔触大小</span>
+          <div class="segmented" id="brushGroup" role="group" aria-label="笔触大小">
+            <button type="button" data-brush="0.8" aria-pressed="false">细腻</button>
+            <button type="button" data-brush="1" class="on" aria-pressed="true">标准</button>
+            <button type="button" data-brush="1.35" aria-pressed="false">粗犷</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="label">笔触风格</span>
+          <div class="segmented" id="paintStyleGroup" role="group" aria-label="笔触风格">
+            <button type="button" data-paint-style="classic" class="on" aria-pressed="true">经典笔触</button>
+            <button type="button" data-paint-style="blockin" aria-pressed="false">色块铺陈</button>
+          </div>
         </div>
       </div>
 

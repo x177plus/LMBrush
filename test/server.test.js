@@ -125,7 +125,7 @@ test("paints the scene with brush strokes when requested", async () => {
   }
 });
 
-test("accepts the hair-fine brush through the API", async () => {
+test("clamps the removed hairline brush through the API", async () => {
   const previous = process.env.LLM_DISABLE;
   process.env.LLM_DISABLE = "1";
   clearCache();
@@ -143,8 +143,8 @@ test("accepts the hair-fine brush through the API", async () => {
       });
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.meta.brush, 0.3);
-      assert.ok(body.meta.strokes > 12000, `${body.meta.strokes} strokes`);
+      assert.equal(body.meta.brush, 0.8);
+      assert.ok(body.meta.strokes > 1000, `${body.meta.strokes} strokes`);
       assert.ok(body.svg.startsWith("<svg"));
       assert.ok(!/<rect\b/.test(body.svg));
     });
@@ -220,6 +220,9 @@ test("repaints an uploaded reference image without a description", async () => {
       const body = await response.json();
       assert.equal(body.ok, true);
       assert.equal(body.meta.mode, "local");
+      assert.equal(body.meta.referenceMode, "faithful");
+      assert.equal(body.meta.reference.mode, "faithful");
+      assert.equal(body.meta.reference.planSource, "pixel");
       assert.equal(body.meta.paintStyle, "blockin");
       assert.equal(body.meta.massSource, "guide");
       assert.equal(body.meta.reference.analysis, "local");

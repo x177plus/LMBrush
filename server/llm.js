@@ -63,11 +63,16 @@ function parseExtraBody(value) {
 }
 
 export function buildMessages(prompt, style = "auto", variant = 0, stylePack = null, options = {}) {
-  const user = [`需求：${prompt}`];
+  const user = [];
+  if (options.instructions) user.push(String(options.instructions).trim());
+  user.push(`需求：${prompt}`);
   if (stylePack) user.push(formatStylePack(stylePack));
   if (style && style !== "auto") user.push(`风格偏好：${style}`);
   if (variant > 0) {
     user.push(`变体编号 ${variant}：请重新独立完成同一需求，不要复用上一次的输出。`);
+  }
+  if (options.canvas && Number.isFinite(Number(options.canvas.w)) && Number.isFinite(Number(options.canvas.h))) {
+    user.push(`画布尺寸必须为 ${Math.round(Number(options.canvas.w))}×${Math.round(Number(options.canvas.h))}，请原样使用。`);
   }
   if (options.compact === false) {
     user.push("输出使用完整字段名（type/fill/stroke/points 等），不要使用短字段名或 palette 颜色索引。");
@@ -82,9 +87,16 @@ export function buildMessages(prompt, style = "auto", variant = 0, stylePack = n
       "- 首轮先给出清晰的大形和主要分块，内部细节留给后续补丁；基础构图控制在 120 个图元以内。",
     ].join("\n"));
   }
+  const text = user.join("\n");
+  const content = options.image
+    ? [
+        { type: "text", text },
+        { type: "image_url", image_url: { url: String(options.image) } },
+      ]
+    : text;
   return [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: user.join("\n") },
+    { role: "user", content },
   ];
 }
 
@@ -149,12 +161,14 @@ export async function generatePlanWithLLM(prompt, style, cfg, variant = 0, style
     try {
       const rawPlan = extractJson(raw);
       const plan = normalizePlan(rawPlan);
-      const check = validatePlan(plan);
+      const minCanvas = Number(options.minCanvas);
+      const check = validatePlan(plan, Number.isFinite(minCanvas) ? { minCanvas } : undefined);
       if (check.ok) {
         // Aesthetic advisories are diagnostic only. Return the model's
         // composition instead of pulling it back toward a fixed template.
         const audit = auditPlan(plan);
-        const focus = options.detail
+        const collectFocus = options.detail || options.collectFocus;
+        const focus = collectFocus
           ? normalizeFocus(rawPlan && rawPlan.focus, plan, options.maxDetailRegions)
           : [];
         return {

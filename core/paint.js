@@ -16,25 +16,6 @@ import { rasterizePlan } from "./raster.js";
 import { elementBounds as boundsOf } from "./bounds.js";
 import { parseHex, toHex, tint, jitterColor } from "./color.js";
 
-/* Only appended for the ultra-fine brush. The extra pass paints sub-4px marks
- * where the high-resolution guide has an edge, so fine features (eyes, whiskers,
- * leaves) survive instead of being averaged into the four base passes.
- */
-const CLASSIC_FINE_PASS = {
-  id: "micro",
-  spacing: 16,
-  jitter: 0.95,
-  length: [12, 24],
-  width: [4, 7],
-  alpha: [0.85, 1],
-  tint: 1.05,
-  colorJitter: { hue: 1, saturation: 2, lightness: 2 },
-  angleMode: "gradient",
-  noise: 0.3,
-  keepChance: 0.02,
-  edgeThreshold: 8,
-};
-
 const CLASSIC_PASSES = [
   {
     id: "primer",
@@ -156,74 +137,18 @@ const BLOCKIN_PASSES = [
   },
 ];
 
-/* Optional focus pass for reference repaints. The vision parser returns 0-3
- * subject boxes; these marks add readable detail inside them without changing
- * the all-over stroke structure.
- */
-const FOCUS_PASSES = {
-  classic: {
-    spacing: 10,
-    jitter: 0.9,
-    length: [12, 26],
-    width: [3.5, 7],
-    alpha: [0.85, 1],
-    tint: 1.05,
-    colorJitter: { hue: 1.2, saturation: 2.5, lightness: 2.5 },
-    angleMode: "gradient",
-    noise: 0.3,
-    maxStrokes: 700,
-  },
-  blockin: {
-    spacing: 12,
-    jitter: 0.92,
-    length: [14, 30],
-    width: [5, 10],
-    alpha: [0.88, 1],
-    tint: 1.03,
-    colorJitter: { hue: 1.2, saturation: 3, lightness: 2.5 },
-    angleMode: "gradient",
-    noise: 0.35,
-    maxStrokes: 500,
-  },
-};
-
-export const MIN_BRUSH_SCALE = 0.3;
+export const MIN_BRUSH_SCALE = 0.8;
 export const MAX_BRUSH_SCALE = 1.8;
 
 const PAINT_STYLES = new Set(["classic", "blockin"]);
+const CLASSIC_GUIDE_SIZE = 192;
 const BLOCKIN_GUIDE_SIZE = 256;
 const BLOCKIN_MAX_STROKES = 3200;
-const FINE_GUIDE_SIZE = 384;
-const FINE_GUIDE_MAX = 640;
-const FINE_BRUSH_MAX = 0.6;
-/* The hair profile paints sub-2px marks, so it needs one guide pixel per ~2
- * canvas pixels; below that the bilinear sampler starts inventing colours that
- * do not exist in the plan.
- */
-const HAIR_GUIDE_SIZE = 512;
-const HAIR_GUIDE_MAX = 768;
-const HAIR_BRUSH_MAX = 0.36;
-const BLOCKIN_FINE_MAX_STROKES = 6000;
-/* At 0.3 the densest reference guides can ask for 30k+ strokes. 24k keeps the
- * plan + SVG JSON under the 4.5MB platform limit and still leaves room for the
- * micro pass after the base passes.
- */
-const FINE_MAX_STROKES = 24000;
 const BLOCKIN_MIN_AREA = 0.006;
 const BLOCKIN_MAX_TARGETS = 28;
 
-/* The fine profile needs more guide pixels than 192 to have any detail to
- * sample. It scales with the canvas but is capped so a larger canvas does not
- * allocate an oversized raster.
- */
-function guideSizeFor(plan, isBlockin, scale) {
-  const fine = scale < FINE_BRUSH_MAX;
-  if (!fine) return isBlockin ? BLOCKIN_GUIDE_SIZE : 192;
-  const hair = scale <= HAIR_BRUSH_MAX;
-  const base = hair ? HAIR_GUIDE_SIZE : FINE_GUIDE_SIZE;
-  const max = hair ? HAIR_GUIDE_MAX : FINE_GUIDE_MAX;
-  const span = Math.max(plan.canvas.w, plan.canvas.h);
-  return Math.round(clamp(span * (base / 1000), base, max));
+function guideSizeFor(isBlockin) {
+  return isBlockin ? BLOCKIN_GUIDE_SIZE : CLASSIC_GUIDE_SIZE;
 }
 
 export function renderPainting(plan, options = {}) {
@@ -232,7 +157,6 @@ export function renderPainting(plan, options = {}) {
   const scale = clamp(Number(options.brushScale) || 1, MIN_BRUSH_SCALE, MAX_BRUSH_SCALE);
   const requestedBatches = options.batches === undefined ? 120 : Number(options.batches);
   const batches = Math.round(clamp(Number.isFinite(requestedBatches) ? requestedBatches : 120, 0, 160));
-  const fine = scale < FINE_BRUSH_MAX;
   const width = plan.canvas.w;
   const height = plan.canvas.h;
   const externalGuide = options.guide;
@@ -242,21 +166,37 @@ export function renderPainting(plan, options = {}) {
     && externalGuide.data && externalGuide.data.length >= externalGuide.width * externalGuide.height * 3
     ? externalGuide
     : rasterizePlan(plan, {
-        size: guideSizeFor(plan, isBlockin, scale),
+        size: guideSizeFor(isBlockin),
         supersample: 2,
       });
+  // Stroke direction can come from a separate guide. Hybrid repaints use the
+  // plan guide for angles and the blended guide for colour, so reference
+  // texture does not randomise directions.
+  const angleGuide = options.angleGuide
+    && Number.isFinite(options.angleGuide.width) && options.angleGuide.width > 0
+    && Number.isFinite(options.angleGuide.height) && options.angleGuide.height > 0
+    && options.angleGuide.data
+    && options.angleGuide.data.length >= options.angleGuide.width * options.angleGuide.height * 3
+    ? options.angleGuide
+    : guide;
   // Keep the classic seed formula unchanged so existing output stays identical.
   const seed = hashString(
     `${options.seed || ""}|${scale}|${isBlockin ? "blockin|" : ""}${JSON.stringify(plan)}`
   );
   const rnd = mulberry32(seed);
   const flow = (rnd() - 0.5) * 1.1;
+  const angleThreshold = Number.isFinite(Number(options.angleThreshold))
+    ? Number(options.angleThreshold)
+    : 6;
+  const angleNoiseScale = Number.isFinite(Number(options.angleNoiseScale))
+    ? clamp(Number(options.angleNoiseScale), 0, 1)
+    : 1;
+  const angleMaxDeviation = Number.isFinite(Number(options.angleMaxDeviation))
+    ? Math.max(0, Number(options.angleMaxDeviation))
+    : Infinity;
   const strokes = [];
-  const focusBoxes = normalizeFocusBoxes(options.focus, width, height);
 
-  // A 3x3 guide average would smear the sub-4px micro marks, so the fine
-  // profile samples bilinearly instead.
-  const sample = makeSampler(guide, { sharp: fine });
+  const sample = makeSampler(guide);
   let massStrokes = 0;
   let massSource = "none";
   let maxMassWidth = 0;
@@ -275,18 +215,11 @@ export function renderPainting(plan, options = {}) {
     maxMassWidth = mass.maxWidth;
   }
 
-  const passes = isBlockin
-    ? BLOCKIN_PASSES
-    : fine
-      ? [...CLASSIC_PASSES, CLASSIC_FINE_PASS]
-      : CLASSIC_PASSES;
-  const maxStrokes = isBlockin
-    ? (fine ? BLOCKIN_FINE_MAX_STROKES : BLOCKIN_MAX_STROKES)
-    : (fine ? FINE_MAX_STROKES : Infinity);
-  // Width follows the brush linearly, but spacing shrinks more slowly below
-  // the fine threshold. Otherwise a 0.3 brush would quadruple the stroke count
-  // of the 0.6 brush while gaining very little.
-  const spacingScale = fine ? Math.sqrt(FINE_BRUSH_MAX * scale) : scale;
+  const passes = isBlockin ? BLOCKIN_PASSES : CLASSIC_PASSES;
+  const maxStrokes = isBlockin ? BLOCKIN_MAX_STROKES : Infinity;
+  // Width and spacing both follow the brush linearly, so a smaller brush makes
+  // proportionally smaller marks at the same density.
+  const spacingScale = scale;
   const passCounts = {};
 
   outer:
@@ -310,18 +243,30 @@ export function renderPainting(plan, options = {}) {
         if (x < -80 || y < -80 || x > width + 80 || y > height + 80) continue;
 
         const gradient = pass.edgeMode === "color"
-          ? colorEdgeAt(guide, x, y)
-          : gradientAt(guide, x, y);
+          ? colorEdgeAt(angleGuide, x, y)
+          : gradientAt(angleGuide, x, y);
         if (pass.keepChance && gradient.magnitude < pass.edgeThreshold && rnd() > pass.keepChance) {
           continue;
         }
 
         const base = sample(x, y);
+        const angleNoise = pass.noise * angleNoiseScale;
         let angle;
-        if (pass.angleMode === "gradient" && gradient.magnitude > 6) {
-          angle = gradient.angle + Math.PI / 2 + (rnd() - 0.5) * pass.noise;
+        if (pass.angleMode === "gradient" && gradient.magnitude > angleThreshold) {
+          const edgeAngle = gradient.angle + Math.PI / 2;
+          const delta = Math.atan2(Math.sin(edgeAngle - flow), Math.cos(edgeAngle - flow));
+          angle = Math.abs(delta) <= angleMaxDeviation
+            ? edgeAngle
+            : flow + Math.sign(delta) * angleMaxDeviation;
         } else {
-          angle = flow + (rnd() - 0.5) * pass.noise;
+          angle = flow;
+        }
+        angle += (rnd() - 0.5) * angleNoise;
+        if (Number.isFinite(angleMaxDeviation)) {
+          const delta = Math.atan2(Math.sin(angle - flow), Math.cos(angle - flow));
+          if (Math.abs(delta) > angleMaxDeviation) {
+            angle = flow + Math.sign(delta) * angleMaxDeviation;
+          }
         }
 
         let length = randomBetween(rnd, pass.length) * scale;
@@ -347,22 +292,6 @@ export function renderPainting(plan, options = {}) {
     passCounts[pass.id] = strokes.length - before;
   }
 
-  if (focusBoxes.length > 0) {
-    const before = strokes.length;
-    appendFocusStrokes({
-      strokes,
-      boxes: focusBoxes,
-      pass: isBlockin ? FOCUS_PASSES.blockin : FOCUS_PASSES.classic,
-      guide,
-      sample,
-      rnd,
-      scale,
-      spacingScale,
-      flow,
-    });
-    passCounts.focus = strokes.length - before;
-  }
-
   return {
     svg: serialize(strokes, plan, batches),
     strokes: strokes.length,
@@ -372,7 +301,6 @@ export function renderPainting(plan, options = {}) {
     massSource,
     maxMassWidth: Math.round(maxMassWidth),
     passCounts,
-    focus: focusBoxes.length,
   };
 }
 
@@ -382,76 +310,6 @@ export function renderPainting(plan, options = {}) {
 function guideMassResult(plan, { scale, rnd, sample }) {
   const fallback = makeGuideMassStrokes(plan, { scale, rnd, sample });
   return { strokes: fallback.strokes, source: "guide", maxWidth: fallback.maxWidth };
-}
-
-/* Paints a dense detail grid inside the vision parser's subject boxes. Both
- * passes are deterministic and only run when focus boxes are supplied, so
- * ordinary generations keep the exact stroke stream they had before.
- */
-function appendFocusStrokes({ strokes, boxes, pass, guide, sample, rnd, scale, spacingScale, flow }) {
-  const spacing = Math.max(3, pass.spacing * spacingScale);
-  let made = 0;
-
-  for (const box of boxes) {
-    const boxW = box.x1 - box.x0;
-    const boxH = box.y1 - box.y0;
-    if (boxW < 4 || boxH < 4) continue;
-    const cols = Math.max(1, Math.ceil(boxW / spacing));
-    const rows = Math.max(1, Math.ceil(boxH / spacing));
-    const cellW = boxW / cols;
-    const cellH = boxH / rows;
-
-    for (let row = 0; row < rows && made < pass.maxStrokes; row++) {
-      for (let col = 0; col < cols && made < pass.maxStrokes; col++) {
-        const x = box.x0 + (col + 0.5) * cellW + (rnd() - 0.5) * cellW * pass.jitter;
-        const y = box.y0 + (row + 0.5) * cellH + (rnd() - 0.5) * cellH * pass.jitter;
-        const gradient = gradientAt(guide, x, y);
-        const base = sample(x, y);
-        const angle = gradient.magnitude > 6
-          ? gradient.angle + Math.PI / 2 + (rnd() - 0.5) * pass.noise
-          : flow + (rnd() - 0.5) * pass.noise;
-        const length = randomBetween(rnd, pass.length) * scale;
-        const strokeWidth = randomBetween(rnd, pass.width) * scale;
-        const color = toHex(jitterColor(tint(base, pass.tint), pass.colorJitter, rnd));
-        const alpha = randomBetween(rnd, pass.alpha);
-        strokes.push(makeStroke({
-          x,
-          y,
-          length,
-          width: strokeWidth,
-          angle,
-          color,
-          alpha,
-          bow: (rnd() - 0.5) * length * 0.16,
-          rnd,
-        }));
-        made++;
-      }
-    }
-  }
-}
-
-/* Vision output is normalized to 0..1. Clamp instead of trusting the model;
- * a bad box should reduce the detail pass, never paint outside the canvas.
- */
-function normalizeFocusBoxes(focus, width, height) {
-  if (!Array.isArray(focus)) return [];
-  const boxes = [];
-  for (const item of focus.slice(0, 4)) {
-    if (!item || typeof item !== "object") continue;
-    const x = Number(item.x);
-    const y = Number(item.y);
-    const w = Number(item.w);
-    const h = Number(item.h);
-    if (![x, y, w, h].every(Number.isFinite)) continue;
-    const x0 = clamp(x, 0, 1) * width;
-    const y0 = clamp(y, 0, 1) * height;
-    const x1 = clamp(x + w, 0, 1) * width;
-    const y1 = clamp(y + h, 0, 1) * height;
-    if (x1 - x0 < 4 || y1 - y0 < 4) continue;
-    boxes.push({ x0, y0, x1, y1 });
-  }
-  return boxes;
 }
 
 /* A few oversized background strokes guarantee coverage before any detail.
@@ -709,31 +567,8 @@ function strokePath(stroke) {
   return `<path d="${stroke.d}" fill="${stroke.color}"${opacity}/>`;
 }
 
-function makeSampler(guide, { sharp = false } = {}) {
+function makeSampler(guide) {
   const { width, height, data, scaleX, scaleY } = guide;
-  if (sharp) {
-    return (x, y) => {
-      const gx = clamp(x * scaleX - 0.5, 0, width - 1);
-      const gy = clamp(y * scaleY - 0.5, 0, height - 1);
-      const x0 = Math.floor(gx);
-      const y0 = Math.floor(gy);
-      const x1 = Math.min(width - 1, x0 + 1);
-      const y1 = Math.min(height - 1, y0 + 1);
-      const fx = gx - x0;
-      const fy = gy - y0;
-      const index00 = (y0 * width + x0) * 3;
-      const index10 = (y0 * width + x1) * 3;
-      const index01 = (y1 * width + x0) * 3;
-      const index11 = (y1 * width + x1) * 3;
-      const out = [0, 0, 0];
-      for (let channel = 0; channel < 3; channel++) {
-        const top = data[index00 + channel] + (data[index10 + channel] - data[index00 + channel]) * fx;
-        const bottom = data[index01 + channel] + (data[index11 + channel] - data[index01 + channel]) * fx;
-        out[channel] = top + (bottom - top) * fy;
-      }
-      return out;
-    };
-  }
   return (x, y) => {
     const gx = clamp(Math.round(x * scaleX), 1, width - 2);
     const gy = clamp(Math.round(y * scaleY), 1, height - 2);

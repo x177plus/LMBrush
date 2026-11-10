@@ -115,6 +115,11 @@ textarea::placeholder { color: var(--muted); }
 .examples button:hover { color: var(--text); border-color: var(--line-control); background: var(--surface); }
 
 .field { display: flex; flex-direction: column; gap: 8px; }
+.field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: flex-start; gap: 16px 0; }
+.field-row .field { min-width: 0; max-width: 100%; }
+@media (max-width: 340px) {
+  .field-row { grid-template-columns: 1fr; }
+}
 .brief-row { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .prompt-field, .reference-field { min-width: 0; }
 @media (min-width: 560px) {
@@ -228,6 +233,7 @@ textarea::placeholder { color: var(--muted); }
   display: inline-flex; align-items: center; gap: 8px;
   color: var(--secondary); font-size: 13px; line-height: 20px; cursor: pointer; user-select: none;
 }
+.switch[hidden] { display: none !important; }
 .switch input {
   position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
 }

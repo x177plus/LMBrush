@@ -175,48 +175,6 @@ test("reference block-in uses guide-sampled masses", () => {
   assert.ok(result.maxMassWidth > 0);
 });
 
-test("focus boxes add deterministic detail strokes", () => {
-  const plan = solidPlan(200, 200, "#ffffff");
-  const focus = [{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }];
-  const first = renderPainting(plan, {
-    guide: solidGuide(),
-    focus,
-    seed: "focus",
-  });
-  const repeat = renderPainting(plan, {
-    guide: solidGuide(),
-    focus,
-    seed: "focus",
-  });
-  const plain = renderPainting(plan, { guide: solidGuide(), seed: "focus" });
-  assert.equal(first.focus, 1);
-  assert.ok(first.passCounts.focus > 0);
-  assert.equal(first.svg, repeat.svg);
-  assert.notEqual(first.svg, plain.svg);
-  assert.ok(first.strokes > plain.strokes);
-});
-
-test("normalizes noisy vision focus boxes", () => {
-  const canvas = { w: 1000, h: 500 };
-  const normalized = normalizeReferenceAnalysis({
-    title: "  晚霞  ",
-    concept: "  一片橙红色的天空  ",
-    focus: [
-      { x: 0.1, y: 0.2, w: 0.3, h: 0.4, label: " 太阳 " },
-      { x: 100, y: 50, w: 200, h: 100, label: "像素坐标" },
-      { x: 2, y: 2, w: 0, h: 0 },
-      { x: 0.9, y: 0.9, w: 0.5, h: 0.5, label: "越界" },
-    ],
-  }, canvas);
-
-  assert.equal(normalized.title, "晚霞");
-  assert.equal(normalized.concept, "一片橙红色的天空");
-  assert.equal(normalized.focus.length, 3);
-  assert.deepEqual(normalized.focus[0], { x: 0.1, y: 0.2, w: 0.3, h: 0.4, label: "太阳" });
-  assert.deepEqual(normalized.focus[1], { x: 0.1, y: 0.1, w: 0.2, h: 0.2, label: "像素坐标" });
-  assert.deepEqual(normalized.focus[2], { x: 0.9, y: 0.9, w: 0.1, h: 0.1, label: "越界" });
-});
-
 test("local repaint works without a description and is deterministic", async () => {
   const image = quadrantImage(48, 32);
   clearReferenceCache();
@@ -313,6 +271,295 @@ function planGeometry(plan) {
   return plan.layers.flatMap((layer) => layer.elements.map(({ x, y, w, h }) => [x, y, w, h]));
 }
 
+const INTERPRET_PLAN = {
+  version: 1,
+  title: "四色重构",
+  concept: "保留四色象限和中央主体，用概括色块重新组织。",
+  canvas: { w: 1000, h: 667, background: "#ffffff" },
+  style: { preset: "flat", lineWidth: 0, outline: null },
+  layers: [
+    {
+      id: "background",
+      elements: [
+        { type: "rect", x: 0, y: 0, w: 1000, h: 334, fill: "#f05a3c" },
+        { type: "rect", x: 0, y: 334, w: 1000, h: 333, fill: "#2850b4" },
+      ],
+    },
+    {
+      id: "subject",
+      elements: [
+        { type: "ellipse", cx: 500, cy: 333, rx: 200, ry: 150, fill: "#fadc78" },
+      ],
+    },
+  ],
+};
+
+test("interpret mode turns the reference image into a layered plan", async () => {
+  const image = quadrantImage();
+  await withVision(INTERPRET_PLAN, async ({ calls, bodies }) => {
+    const result = await repaintReference({
+      image: image.payload,
+      prompt: "保留四色构图，整体偏暖",
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+    });
+
+    assert.equal(result.meta.referenceMode, "interpret");
+    assert.equal(result.meta.mode, "llm");
+    assert.equal(result.meta.reference.planSource, "llm");
+    assert.equal(result.meta.reference.regions, 3);
+    assert.equal(result.plan.canvas.w, 1000);
+    assert.equal(result.plan.canvas.h, 667);
+    assert.equal(result.plan.layers.length, 2);
+    assert.ok(result.meta.strokes > 0);
+    assert.ok(result.svg.startsWith("<svg"));
+    assert.equal(calls(), 1);
+
+    const content = bodies[0].messages[1].content;
+    assert.ok(Array.isArray(content));
+    assert.ok(content.some((part) => part.type === "image_url"));
+    const text = content.find((part) => part.type === "text").text;
+    assert.match(text, /参考图主色板/);
+    assert.match(text, /1000×667/);
+    assert.match(text, /保留四色构图/);
+  });
+});
+
+test("interpret mode caches the plan and re-renders when the brush changes", async () => {
+  const image = quadrantImage();
+  await withVision(INTERPRET_PLAN, async ({ calls }) => {
+    const first = await repaintReference({
+      image: image.payload,
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+    });
+    const second = await repaintReference({
+      image: image.payload,
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 1.2,
+      variant: 0,
+    });
+
+    assert.equal(calls(), 1);
+    assert.equal(first.meta.planCached, undefined);
+    assert.equal(second.meta.planCached, true);
+    assert.notEqual(first.meta.strokes, second.meta.strokes);
+    assert.deepEqual(second.plan, first.plan);
+  });
+});
+
+test("interpret mode refits a mismatched plan canvas to the reference aspect", async () => {
+  const image = quadrantImage(96, 96);
+  await withVision(INTERPRET_PLAN, async () => {
+    const result = await repaintReference({
+      image: image.payload,
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+    });
+    assert.equal(result.plan.canvas.w, 1000);
+    assert.equal(result.plan.canvas.h, 1000);
+    assert.equal(result.meta.reference.canvasAdjusted, true);
+    assert.ok(result.meta.strokes > 0);
+    assert.ok(result.svg.includes('viewBox="0 0 1000 1000"'));
+  });
+});
+
+test("interpret mode refits block-in masses through the guide", async () => {
+  const image = quadrantImage(96, 96);
+  await withVision(INTERPRET_PLAN, async () => {
+    const result = await repaintReference({
+      image: image.payload,
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "blockin",
+      brush: 1,
+      variant: 1,
+    });
+    assert.equal(result.meta.paintStyle, "blockin");
+    assert.equal(result.meta.reference.canvasAdjusted, true);
+    assert.equal(result.meta.massSource, "guide");
+    assert.ok(result.meta.massStrokes > 0);
+  });
+});
+
+test("interpret mode refines focus layers with local detail patches", async () => {
+  const image = quadrantImage();
+  const planWithFocus = { ...INTERPRET_PLAN, focus: ["subject"] };
+  const patch = {
+    elements: [
+      { type: "ellipse", cx: 450, cy: 380, rx: 18, ry: 22, fill: "#2b2b2b" },
+      { type: "ellipse", cx: 550, cy: 380, rx: 18, ry: 22, fill: "#2b2b2b" },
+      { type: "ellipse", cx: 500, cy: 430, rx: 10, ry: 8, fill: "#8a4a2a" },
+      { type: "ellipse", cx: 460, cy: 365, rx: 6, ry: 6, fill: "#ffffff" },
+    ],
+  };
+
+  await withVision((body) => {
+    const content = body.messages?.[1]?.content;
+    const isDetail = Array.isArray(content)
+      && content.some((part) => part.type === "text" && part.text.includes("目标物体"));
+    return isDetail ? patch : planWithFocus;
+  }, async ({ calls, bodies }) => {
+    const result = await repaintReference({
+      image: image.payload,
+      prompt: "保留猫的脸部结构",
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+      refine: true,
+    });
+
+    assert.equal(calls(), 2);
+    assert.equal(result.meta.refine.requested, true);
+    assert.equal(result.meta.refine.applied, true);
+    assert.equal(result.meta.refine.regions, 1);
+    assert.equal(result.meta.refine.elements, 4);
+    assert.equal(result.meta.refine.failed, 0);
+    assert.deepEqual(result.meta.reference.focusLayers, ["subject"]);
+    assert.equal(result.meta.reference.regions, 7);
+    assert.ok(result.plan.layers.some((layer) => layer.id.startsWith("detail-subject")));
+    assert.equal(result.meta.usage.total_tokens, 60);
+
+    const detail = bodies.find((body) => {
+      const content = body.messages?.[1]?.content;
+      return Array.isArray(content)
+        && content.some((part) => part.type === "text" && part.text.includes("目标物体"));
+    });
+    assert.ok(detail);
+    const detailContent = detail.messages[1].content;
+    assert.ok(detailContent.some((part) => part.type === "image_url"));
+    assert.ok(detailContent.some((part) => part.type === "text" && /参考图：已附上原图/.test(part.text)));
+  });
+});
+
+test("interpret mode can skip refinement with refine:false", async () => {
+  const image = quadrantImage();
+  const planWithFocus = { ...INTERPRET_PLAN, focus: ["subject"] };
+
+  await withVision(planWithFocus, async ({ calls }) => {
+    const result = await repaintReference({
+      image: image.payload,
+      mode: "llm",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+      refine: false,
+    });
+
+    assert.equal(calls(), 1);
+    assert.equal(result.meta.refine, undefined);
+    assert.equal(result.meta.reference.regions, 3);
+  });
+});
+
+test("hybrid mode blends plan structure with reference pixels", async () => {
+  const image = quadrantImage();
+  const planWithFocus = { ...INTERPRET_PLAN, focus: ["subject"] };
+  const patch = {
+    elements: [
+      { type: "ellipse", cx: 450, cy: 380, rx: 18, ry: 22, fill: "#2b2b2b" },
+      { type: "ellipse", cx: 550, cy: 380, rx: 18, ry: 22, fill: "#2b2b2b" },
+      { type: "ellipse", cx: 500, cy: 430, rx: 10, ry: 8, fill: "#8a4a2a" },
+      { type: "ellipse", cx: 460, cy: 365, rx: 6, ry: 6, fill: "#ffffff" },
+    ],
+  };
+
+  await withVision((body) => {
+    const content = body.messages?.[1]?.content;
+    const isDetail = Array.isArray(content)
+      && content.some((part) => part.type === "text" && part.text.includes("目标物体"));
+    return isDetail ? patch : planWithFocus;
+  }, async ({ calls }) => {
+    const result = await repaintReference({
+      image: image.payload,
+      prompt: "保留猫的脸部结构，暖色调",
+      mode: "llm",
+      referenceMode: "hybrid",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+      refine: true,
+    });
+
+    assert.equal(calls(), 2);
+    assert.equal(result.meta.mode, "llm");
+    assert.equal(result.meta.referenceMode, "hybrid");
+    assert.equal(result.meta.reference.mode, "hybrid");
+    assert.equal(result.meta.reference.planSource, "hybrid");
+    assert.equal(result.meta.reference.baseGuide, "blend");
+    assert.equal(result.meta.reference.blend, 0.35);
+    assert.equal(result.meta.refine.applied, true);
+    assert.ok(result.plan.layers.some((layer) => layer.id.startsWith("detail-subject")));
+    assert.ok(result.svg.startsWith("<svg"));
+  });
+});
+
+test("interpret mode falls back to the pixel guide when the model fails", async () => {
+  const image = quadrantImage();
+  await withVision({}, async ({ calls }) => {
+    const result = await repaintReference({
+      image: image.payload,
+      mode: "auto",
+      referenceMode: "interpret",
+      paintStyle: "classic",
+      brush: 0.8,
+      variant: 0,
+    });
+
+    assert.equal(calls(), 1);
+    assert.equal(result.meta.referenceMode, "interpret");
+    assert.equal(result.meta.mode, "local");
+    assert.equal(result.meta.reference.planSource, "pixel");
+    assert.match(result.meta.warning, /回退到忠实复刻/);
+    assert.ok(result.svg.startsWith("<svg"));
+  }, { status: 400 });
+});
+
+test("interpret mode rejects local mode and requires vision in llm mode", async () => {
+  const image = quadrantImage(32, 24);
+  await assert.rejects(
+    () => repaintReference({ image: image.payload, mode: "local", referenceMode: "interpret" }),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.match(error.message, /本地模式/);
+      return true;
+    }
+  );
+
+  const previousDisable = process.env.VISION_DISABLE;
+  const previousModel = process.env.VISION_MODEL;
+  process.env.VISION_DISABLE = "1";
+  delete process.env.VISION_MODEL;
+  try {
+    await assert.rejects(
+      () => repaintReference({ image: image.payload, mode: "llm", referenceMode: "interpret" }),
+      (error) => {
+        assert.equal(error.status, 503);
+        assert.match(error.message, /视觉模型/);
+        return true;
+      }
+    );
+  } finally {
+    if (previousDisable === undefined) delete process.env.VISION_DISABLE;
+    else process.env.VISION_DISABLE = previousDisable;
+    if (previousModel !== undefined) process.env.VISION_MODEL = previousModel;
+  }
+});
+
 function planFills(plan) {
   return plan.layers.flatMap((layer) => layer.elements.map((element) => element.fill));
 }
@@ -323,14 +570,30 @@ function svgWarmth(svg) {
   return colors.reduce((total, rgb) => total + rgb[0] - rgb[2], 0) / colors.length;
 }
 
-async function withVision(reply, fn) {
+async function withVision(reply, fn, { status = 200 } = {}) {
   let calls = 0;
+  const bodies = [];
+  const replyFor = typeof reply === "function" ? reply : () => reply;
   const server = createServer(async (req, res) => {
     calls += 1;
-    for await (const chunk of req) void chunk;
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    let body = null;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      bodies.push(body);
+    } catch {
+      bodies.push(null);
+    }
+    if (status !== 200) {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "mock vision failure" } }));
+      return;
+    }
+    const current = replyFor(body, calls);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify(reply) } }],
+      choices: [{ message: { content: JSON.stringify(current) } }],
       usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
     }));
   });
@@ -345,7 +608,7 @@ async function withVision(reply, fn) {
   process.env.VISION_IMAGE_SIZE = "128";
   clearReferenceCache();
   try {
-    await fn({ calls: () => calls });
+    await fn({ calls: () => calls, bodies });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     for (const key of keys) {
@@ -357,21 +620,20 @@ async function withVision(reply, fn) {
 }
 
 test("normalizes vision tone and drops neutral values", () => {
-  const canvas = { w: 1000, h: 500 };
   const toned = normalizeReferenceAnalysis({
     title: "暖调",
     concept: "整体调暖",
     tone: { warmth: 0.4, saturation: 110, contrast: 1.2, hue: 300 },
-  }, canvas);
+  });
   assert.deepEqual(toned.tone, {
     warmth: 0.4, saturation: 1.1, brightness: 0, contrast: 1.2, hue: -60,
   });
 
   const neutral = normalizeReferenceAnalysis({
     tone: { warmth: 0, saturation: 1, brightness: 0, contrast: 1, hue: 0 },
-  }, canvas);
+  });
   assert.equal(neutral.tone, null);
-  assert.equal(normalizeReferenceAnalysis({}, canvas).tone, null);
+  assert.equal(normalizeReferenceAnalysis({}).tone, null);
 });
 
 test("local tone keywords recolour without moving regions", async () => {

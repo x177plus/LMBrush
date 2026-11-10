@@ -156,9 +156,11 @@ export function createApp() {
           image: body.image,
           prompt: body.prompt,
           mode: body.mode || "auto",
+          referenceMode: body.referenceMode || "faithful",
           paintStyle: body.paintStyle || "classic",
           brush: body.brush ?? 1,
           variant: body.variant ?? 0,
+          refine: body.refine ?? true,
         });
         return json(res, 200, { ok: true, ...result });
       }
