@@ -183,6 +183,7 @@ test("local repaint works without a description and is deterministic", async () 
     prompt: "",
     mode: "local",
     paintStyle: "classic",
+    brushShape: "leaf",
     brush: 1,
     variant: 3,
   });
@@ -191,6 +192,7 @@ test("local repaint works without a description and is deterministic", async () 
     prompt: "",
     mode: "local",
     paintStyle: "classic",
+    brushShape: "leaf",
     brush: 1,
     variant: 3,
   });
@@ -199,6 +201,9 @@ test("local repaint works without a description and is deterministic", async () 
   assert.equal(first.meta.mode, "local");
   assert.equal(first.meta.reference.analysis, "local");
   assert.equal(first.meta.reference.image.width, 48);
+  assert.equal(first.meta.brushShape, "leaf");
+  assert.ok(Array.isArray(first.meta.leafMix));
+  assert.ok(first.meta.leafMix.length >= 2 && first.meta.leafMix.length <= 3);
   assert.ok(first.meta.reference.regions >= 4);
   assert.equal(first.meta.variant, 3);
   assert.ok(first.meta.strokes > 100);
@@ -344,6 +349,7 @@ test("interpret mode caches the plan and re-renders when the brush changes", asy
       mode: "llm",
       referenceMode: "interpret",
       paintStyle: "classic",
+      brushShape: "leaf",
       brush: 1.2,
       variant: 0,
     });
@@ -351,7 +357,11 @@ test("interpret mode caches the plan and re-renders when the brush changes", asy
     assert.equal(calls(), 1);
     assert.equal(first.meta.planCached, undefined);
     assert.equal(second.meta.planCached, true);
+    assert.equal(second.meta.brushShape, "leaf");
+    assert.ok(Array.isArray(second.meta.leafMix));
+    assert.ok(second.meta.leafMix.length >= 2 && second.meta.leafMix.length <= 3);
     assert.notEqual(first.meta.strokes, second.meta.strokes);
+    assert.notEqual(first.svg, second.svg);
     assert.deepEqual(second.plan, first.plan);
   });
 });
@@ -516,6 +526,7 @@ test("interpret mode falls back to the pixel guide when the model fails", async 
       mode: "auto",
       referenceMode: "interpret",
       paintStyle: "classic",
+      brushShape: "leaf",
       brush: 0.8,
       variant: 0,
     });
@@ -523,6 +534,9 @@ test("interpret mode falls back to the pixel guide when the model fails", async 
     assert.equal(calls(), 1);
     assert.equal(result.meta.referenceMode, "interpret");
     assert.equal(result.meta.mode, "local");
+    assert.equal(result.meta.brushShape, "leaf");
+    assert.ok(Array.isArray(result.meta.leafMix));
+    assert.ok(result.meta.leafMix.length >= 2 && result.meta.leafMix.length <= 3);
     assert.equal(result.meta.reference.planSource, "pixel");
     assert.match(result.meta.warning, /回退到忠实复刻/);
     assert.ok(result.svg.startsWith("<svg"));

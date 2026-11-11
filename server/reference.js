@@ -24,7 +24,7 @@ import {
   referenceGuide,
   REFERENCE_CANVAS_MIN,
 } from "../core/reference.js";
-import { renderPainting, MIN_BRUSH_SCALE, MAX_BRUSH_SCALE } from "../core/paint.js";
+import { renderPainting, BRUSH_SHAPES, MIN_BRUSH_SCALE, MAX_BRUSH_SCALE } from "../core/paint.js";
 import { rasterizePlan } from "../core/raster.js";
 import { validatePlan } from "../core/schema.js";
 import { encodePngRgb } from "../core/png.js";
@@ -75,6 +75,7 @@ export async function repaintReference({
   mode = "auto",
   referenceMode = "faithful",
   paintStyle = "classic",
+  brushShape = "default",
   brush = 1,
   variant = 0,
   refine = true,
@@ -90,6 +91,7 @@ export async function repaintReference({
   const safeMode = MODES.has(mode) ? mode : "auto";
   const safeReferenceMode = REFERENCE_MODES.has(referenceMode) ? referenceMode : "faithful";
   const safePaintStyle = PAINT_STYLES.has(paintStyle) ? paintStyle : "classic";
+  const safeBrushShape = BRUSH_SHAPES.includes(brushShape) ? brushShape : "default";
   const brushScale = clampBrush(brush);
   const safeVariant = clampVariant(variant);
   const safeRefine = refine !== false && refine !== 0 && refine !== "0";
@@ -106,6 +108,7 @@ export async function repaintReference({
       mode: safeMode,
       referenceMode: safeReferenceMode,
       paintStyle: safePaintStyle,
+      brushShape: safeBrushShape,
       brushScale,
       variant: safeVariant,
       refine: safeRefine,
@@ -183,6 +186,7 @@ export async function repaintReference({
     tone,
     brushScale,
     paintStyle: safePaintStyle,
+    brushShape: safeBrushShape,
     variant: safeVariant,
   });
 
@@ -191,6 +195,8 @@ export async function repaintReference({
     referenceMode: "faithful",
     render: "paint",
     paintStyle: safePaintStyle,
+    brushShape: safeBrushShape,
+    ...(safeBrushShape === "leaf" ? { leafMix: painted.leafMix } : {}),
     brush: brushScale,
     variant: safeVariant,
     strokes: painted.strokes,
@@ -232,7 +238,7 @@ export async function repaintReference({
  * object is applied to both the plan fills and the guide before the brush
  * passes, so only colour changes.
  */
-function paintWithPixelGuide({ reference, plan, tone = null, brushScale, paintStyle, variant }) {
+function paintWithPixelGuide({ reference, plan, tone = null, brushScale, paintStyle, brushShape, variant }) {
   const guide = referenceGuide(reference, plan);
   if (tone) applyTonePixels(guide.data, tone);
 
@@ -241,6 +247,7 @@ function paintWithPixelGuide({ reference, plan, tone = null, brushScale, paintSt
     brushScale,
     seed: variant || "",
     paintStyle,
+    brushShape,
     guide,
     massSource: "guide",
   });
@@ -257,6 +264,7 @@ async function repaintInterpret({
   mode,
   referenceMode,
   paintStyle,
+  brushShape,
   brushScale,
   variant,
   refine,
@@ -288,6 +296,7 @@ async function repaintInterpret({
       plan: localPlan,
       text,
       paintStyle,
+      brushShape,
       brushScale,
       variant,
       pricing,
@@ -338,6 +347,7 @@ async function repaintInterpret({
         plan: localPlan,
         text,
         paintStyle,
+        brushShape,
         brushScale,
         variant,
         pricing,
@@ -360,6 +370,7 @@ async function repaintInterpret({
       plan: localPlan,
       text,
       paintStyle,
+      brushShape,
       brushScale,
       variant,
       pricing,
@@ -431,6 +442,7 @@ async function repaintInterpret({
       plan: localPlan,
       text,
       paintStyle,
+      brushShape,
       brushScale,
       variant,
       pricing,
@@ -460,6 +472,7 @@ async function repaintInterpret({
     brushScale,
     seed: variant || "",
     paintStyle,
+    brushShape,
     guide: baseGuide,
     angleGuide: prepared.guide,
     ...(hybrid ? {
@@ -486,6 +499,8 @@ async function repaintInterpret({
     referenceMode,
     render: "paint",
     paintStyle,
+    brushShape,
+    ...(brushShape === "leaf" ? { leafMix: painted.leafMix } : {}),
     brush: brushScale,
     variant,
     strokes: painted.strokes,
@@ -645,6 +660,7 @@ function faithfulFallback({
   plan,
   text,
   paintStyle,
+  brushShape,
   brushScale,
   variant,
   pricing,
@@ -661,6 +677,7 @@ function faithfulFallback({
     tone,
     brushScale,
     paintStyle,
+    brushShape,
     variant,
   });
   const cost = addCost(emptyCost(), usage, pricing.vision);
@@ -670,6 +687,8 @@ function faithfulFallback({
     referenceMode,
     render: "paint",
     paintStyle,
+    brushShape,
+    ...(brushShape === "leaf" ? { leafMix: painted.leafMix } : {}),
     brush: brushScale,
     variant,
     strokes: painted.strokes,
@@ -951,6 +970,7 @@ function logReference({ text, plan, meta }) {
     console.log(
       `[lmbrush] ${label} ${mode} · ${ref.image.width}×${ref.image.height} → ` +
       `${ref.canvas.w}×${ref.canvas.h} · regions=${ref.regions} · source=${source} · paint=${meta.paintStyle}` +
+      ` · shape=${meta.brushShape || "default"}${meta.leafMix?.length ? `(${meta.leafMix.join("+")})` : ""}` +
       ` · brush=${meta.brush} · strokes=${meta.strokes}` +
       (meta.planMs ? ` · plan=${meta.planMs}ms` : "") +
       (meta.analysisMs ? ` · analysis=${meta.analysisMs}ms` : "")

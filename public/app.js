@@ -20,6 +20,7 @@ const LOGIN_PATH = new URL("api/login", document.baseURI).pathname;
 const state = {
   style: "auto",
   paintStyle: "classic",
+  brushShape: "default",
   brush: 1,
   detail: false,
   variant: 0,
@@ -68,6 +69,7 @@ const els = {
   clearHistory: $("#clearHistory"),
   styleGroup: $("#styleGroup"),
   paintStyleGroup: $("#paintStyleGroup"),
+  brushShapeGroup: $("#brushShapeGroup"),
   brushGroup: $("#brushGroup"),
   detailSwitch: $("#detailSwitch"),
   detailToggle: $("#detailToggle"),
@@ -147,6 +149,12 @@ function init() {
     if (!button) return;
     state.paintStyle = button.dataset.paintStyle;
     markPressed(els.paintStyleGroup, button);
+  });
+  els.brushShapeGroup.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-brush-shape]");
+    if (!button) return;
+    state.brushShape = button.dataset.brushShape;
+    markPressed(els.brushShapeGroup, button);
   });
   els.faithfulToggle.addEventListener("change", () => {
     if (state.busy || state.referenceBusy) {
@@ -692,6 +700,7 @@ async function renderOnly(payload, prompt, started) {
     plan: state.last.plan,
     render: payload.render,
     paintStyle: payload.paintStyle,
+    brushShape: payload.brushShape,
     brush: payload.brush,
     variant: payload.variant,
   });
@@ -734,6 +743,7 @@ async function runGeneratePipeline(payload, prompt, started) {
       plan,
       render: payload.render,
       paintStyle: payload.paintStyle,
+      brushShape: payload.brushShape,
       brush: payload.brush,
       variant: payload.variant,
     });
@@ -865,7 +875,9 @@ async function generate({ forceNew = false } = {}) {
     && state.last.stylePack === state.stylePack
     && state.last.detail === state.detail;
   const renderOnlyChange = samePlanInputs
-    && (state.last.paintStyle !== state.paintStyle || state.last.brush !== state.brush);
+    && (state.last.paintStyle !== state.paintStyle
+      || state.last.brushShape !== state.brushShape
+      || state.last.brush !== state.brush);
   if (forceNew || (state.last
       && state.last.prompt === prompt
       && state.last.referenceKey === referenceKey
@@ -900,6 +912,7 @@ async function generate({ forceNew = false } = {}) {
           mode: els.mode.value,
           referenceMode: state.referenceMode,
           paintStyle: state.paintStyle,
+          brushShape: state.brushShape,
           brush: state.brush,
           variant: state.variant,
           image: { w: reference.width, h: reference.height, data: reference.data },
@@ -908,6 +921,7 @@ async function generate({ forceNew = false } = {}) {
           prompt,
           style: state.style,
           paintStyle: state.paintStyle,
+          brushShape: state.brushShape,
           render: "paint",
           mode: els.mode.value,
           brush: state.brush,
@@ -1073,6 +1087,9 @@ function showResult(data, prompt, { pending = false, animate = false, keepStage 
     ? (meta.paintStyle === "blockin" ? "油画 · 色块铺陈" : "油画 · 经典笔触")
     : "扁平"];
   if (meta.strokes) bits.push(`${meta.strokes} 笔 · ${brushLabel(meta.brush)}`);
+  if (meta.brushShape === "leaf") {
+    bits.push(`叶形笔刷 · ${leafMixLabel(meta.leafMix)}`);
+  }
   if (isReference) {
     if (reconstruct) {
       bits.push(hybrid ? "混合重构" : "参考重构");
@@ -1190,6 +1207,7 @@ function showResult(data, prompt, { pending = false, animate = false, keepStage 
     mode: els.mode.value,
     stylePack: state.stylePack,
     paintStyle: meta.paintStyle || state.paintStyle,
+    brushShape: meta.brushShape || state.brushShape,
     brush: meta.brush ?? state.brush,
     detail: Boolean(meta.detail && meta.detail.requested) || state.detail,
   };
@@ -1303,6 +1321,20 @@ function brushLabel(value) {
   return "标准";
 }
 
+const LEAF_LABELS = {
+  simple: "普通叶",
+  maple: "枫叶",
+  ginkgo: "银杏",
+  oak: "橡叶",
+};
+
+function leafMixLabel(mix) {
+  const labels = (Array.isArray(mix) ? mix : [])
+    .map((type) => LEAF_LABELS[type])
+    .filter(Boolean);
+  return labels.length ? labels.join(" / ") : "混合";
+}
+
 function slug(value) {
   const cleaned = String(value || "")
     .trim()
@@ -1351,6 +1383,7 @@ function saveHistory(data, prompt) {
     referenceMode: state.referenceMode,
     style: state.style,
     paintStyle: state.paintStyle,
+    brushShape: state.brushShape,
     brush: state.brush,
     detail: state.detail,
     svg: data.svg,
@@ -1413,6 +1446,10 @@ function restore(item) {
       .find((candidate) => candidate.dataset.paintStyle === item.paintStyle);
     if (button) markPressed(els.paintStyleGroup, button);
   }
+  state.brushShape = item.brushShape === "leaf" ? "leaf" : "default";
+  const shapeButton = [...els.brushShapeGroup.querySelectorAll("button")]
+    .find((candidate) => candidate.dataset.brushShape === state.brushShape);
+  if (shapeButton) markPressed(els.brushShapeGroup, shapeButton);
   if (item.brush) {
     const button = [...els.brushGroup.querySelectorAll("button")]
       .find((candidate) => Number(candidate.dataset.brush) === item.brush);
@@ -1446,6 +1483,7 @@ function restore(item) {
     mode: els.mode.value,
     stylePack: state.stylePack,
     paintStyle: state.paintStyle,
+    brushShape: state.brushShape,
     brush: state.brush,
     detail: state.detail,
   };

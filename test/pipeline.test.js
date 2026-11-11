@@ -25,7 +25,26 @@ test("renders a plan to SVG", async () => {
   assert.ok(result.svg.startsWith("<svg"));
   assert.equal(result.meta.render, "paint");
   assert.equal(result.meta.paintStyle, "blockin");
+  assert.equal(result.meta.brushShape, "default");
   assert.ok(result.meta.strokes > 0);
+});
+
+test("renders a leaf brush shape", async () => {
+  const plan = planFromPrompt("一只橘猫", "auto", 0);
+  const result = await runPipelineStep({
+    step: "render",
+    plan,
+    paintStyle: "classic",
+    brushShape: "leaf",
+    brush: 1,
+    variant: 0,
+  });
+  assert.ok(result.svg.startsWith("<svg"));
+  assert.equal(result.meta.brushShape, "leaf");
+  assert.ok(Array.isArray(result.meta.leafMix));
+  assert.ok(result.meta.leafMix.length >= 2 && result.meta.leafMix.length <= 3);
+  assert.equal(result.meta.paintStyle, "classic");
+  assert.ok(result.meta.strokes > 1000);
 });
 
 test("rejects unknown steps and oversized canvases", async () => {

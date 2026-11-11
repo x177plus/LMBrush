@@ -20,7 +20,7 @@ import { visionConfig, critiquePlan, shouldRepair, repairPlanFromCritique, norma
 import { enrichPlanWithDetails } from "./detail.js";
 import { pricingConfig, emptyCost, addCost } from "./pricing.js";
 import { renderPlan } from "../core/render.js";
-import { renderPainting } from "../core/paint.js";
+import { renderPainting, BRUSH_SHAPES } from "../core/paint.js";
 
 const MODES = ["auto", "llm", "local"];
 const RENDERS = ["flat", "paint"];
@@ -86,6 +86,7 @@ async function renderStep(input) {
   const variant = clampVariant(input.variant);
   const render = RENDERS.includes(input.render) ? input.render : "paint";
   const paintStyle = PAINT_STYLES.includes(input.paintStyle) ? input.paintStyle : "classic";
+  const brushShape = BRUSH_SHAPES.includes(input.brushShape) ? input.brushShape : "default";
 
   if (render === "flat") {
     return {
@@ -98,12 +99,15 @@ async function renderStep(input) {
     brushScale: brush,
     seed: variant || "",
     paintStyle,
+    brushShape,
   });
   return {
     svg: painted.svg,
     meta: {
       render: "paint",
       paintStyle,
+      brushShape,
+      ...(brushShape === "leaf" ? { leafMix: painted.leafMix } : {}),
       strokes: painted.strokes,
       brush,
       massStrokes: painted.massStrokes,

@@ -26,6 +26,10 @@ browser-native ES modules.
 - **Two oil-painting styles.** *Classic brush* builds layers from underpaint to
   fine detail; *block-in* starts from a few oversized colour fields and refines
   them. Three brush sizes, from fine detail to bold.
+- **Two brush shapes, four leaf species.** The default rounded mark, or a
+  leaf-shaped mark with a petiole and veins. Each leaf painting automatically
+  mixes two or three of *simple*, *maple*, *ginkgo* and *oak*. Shape is
+  independent of paint style and brush size.
 - **No model required.** Without an LLM the built-in rule-based planner still
   covers common subjects: people, animals, landscapes, cities, night skies,
   flowers and abstract compositions.
@@ -122,10 +126,10 @@ placement, texture and determinism. The plan is a small contract, so failures
 stay in the structure layer and come back with a list of errors the model can
 fix.
 
-Rendering is seeded by `hash(brush style + paint style + plan JSON)`: the same
-input always yields the same strokes. Plan and render caches are separate, so
-switching brush style or size only re-renders — it does not call the model
-again. Both caches are in-process and bounded (40 entries).
+Rendering is seeded by `hash(brush shape + brush style + paint style + plan JSON)`:
+the same input always yields the same strokes. Plan and render caches are
+separate, so switching brush shape, style or size only re-renders — it does not
+call the model again. Both caches are in-process and bounded (40 entries).
 
 ## Brush styles
 
@@ -144,6 +148,18 @@ Colours are averaged from a 3×3 neighbourhood of the guide and nudged in HSL
 (±2° hue, ±4% saturation, ±4% lightness), so adjacent strokes always differ
 slightly.
 Stroke direction follows the local gradient; flat areas fall back to one flow.
+
+### Brush shapes
+
+`paintStyle` controls the stroke layout; `brushShape` controls the outline of
+each mark. `default` keeps the rounded tapered mark. `leaf` turns every mark
+into a leaf with a petiole, central vein and side veins. For each painting the
+renderer picks two or three of *simple*, *maple*, *ginkgo* and *oak* from the
+seeded stream; each mark then draws from that mix, so one picture contains
+several leaf species without a selection step. `meta.leafMix` reports the
+chosen species. Leaf and vein paths are heavier: expect roughly 2.5–4× the SVG
+of the default mark at the same size; fine-detail leaf output can reach
+~2.5 MB. Canvas coverage is unchanged.
 
 The picture is 100% brush polygons — there is no background rectangle.
 
@@ -191,7 +207,8 @@ flowchart LR
 - `tone` is a global grade — warmth, saturation, brightness, contrast and hue
   rotation. It changes colour, never composition or stroke structure.
 - Analysis results are cached in memory by image hash + prompt + vision model
-  (12 entries). Switching brush style or size re-renders without another call.
+  (12 entries). Switching paint style, brush shape or brush size re-renders
+  without another call.
 
 ### Hybrid (switch off, default)
 
@@ -451,6 +468,7 @@ directions.
   "mode": "auto",
   "referenceMode": "hybrid",
   "paintStyle": "classic",
+  "brushShape": "default",
   "brush": 1,
   "variant": 0,
   "image": { "w": 512, "h": 384, "data": "<base64 RGB>" }
@@ -464,9 +482,9 @@ PNG/JPEG. `referenceMode` is `faithful` (API default for compatibility),
 plan-only experiment). `refine` defaults to `true` and adds one image-aware
 local detail pass on focus layers in `hybrid` and `interpret`; `faithful`
 ignores it. `mode` is `auto`, `llm` or `local`; `hybrid`/`interpret` cannot be
-combined with `local`. `paintStyle` is `classic` or `blockin`; `brush` is
-0.8–1.8; `variant` is 0–999. Style packs, presets and the `detail` option are
-ignored in this mode.
+combined with `local`. `paintStyle` is `classic` or `blockin`; `brushShape` is
+`default` or `leaf`; `brush` is 0.8–1.8; `variant` is 0–999. Style packs,
+presets and the `detail` option are ignored in this mode.
 
 Faithful responses include `meta.reference` (regions and analysis source),
 `meta.tone` and `meta.toneSource`. Hybrid/pure LLM responses include
@@ -484,20 +502,21 @@ enabled.
 
 ```json
 { "prompt": "a ginger cat, starry night", "style": "flat", "mode": "auto",
-  "render": "paint", "paintStyle": "blockin", "brush": 1,
-  "variant": 0, "stylePack": "claude", "detail": false }
+  "render": "paint", "paintStyle": "blockin", "brushShape": "default",
+  "brush": 1, "variant": 0, "stylePack": "claude", "detail": false }
 ```
 
 - `style`: `auto`, `flat`, `line`, `gradient`, `minimal`
 - `mode`: `auto` (LLM, fall back to local), `llm`, `local`
 - `render`: `paint` (default) or `flat` (API only)
 - `paintStyle`: `classic` or `blockin`
+- `brushShape`: `default` or `leaf`; leaf species are mixed automatically
 - `brush`: `0.8` fine-detail, `1` standard, `1.35` bold
 - `detail`: enable local detail patches (LLM only, 1–2 extra calls)
 - `variant`: 0–999; increments bypass the cache and produce a new composition
 
 The response carries `plan`, `svg` and `meta` (`mode`, `model`, `ms`,
-`strokes`, `paintStyle`, per-stage timings, `advisories`, `aesthetic`,
+`strokes`, `paintStyle`, `brushShape`, `leafMix`, per-stage timings, `advisories`, `aesthetic`,
 `critique`, `criticRepair`, `detail`, `usage`, `cost`). `meta.advisories` are
 diagnostics only: they never trigger repairs and never block rendering. With
 prices configured, `meta.cost` breaks input/output tokens and USD amounts down.
@@ -512,7 +531,7 @@ step.
 | step | Request fields | Response |
 |---|---|---|
 | `plan` | `prompt`, `style`, `mode`, `variant`, `stylePack`, `detail` | `plan`, `focus`, `meta` |
-| `render` | `plan`, `render`, `paintStyle`, `brush`, `variant` | `svg`, `meta` |
+| `render` | `plan`, `render`, `paintStyle`, `brushShape`, `brush`, `variant` | `svg`, `meta` |
 | `critique` | `plan`, `prompt`, `stylePack` | `critique`, `repair`, `meta` |
 | `repair` | `plan`, `critique`, `prompt`, `style`, `stylePack` | `plan` or `null`, `applied`, `meta` |
 | `detail` | `plan`, `prompt`, `focus`, `style`, `stylePack` | `plan` or `null`, `applied`, `meta` |
@@ -691,10 +710,11 @@ eval/                prompts and batch evaluation
   conversation loop.
 - **Zero dependencies.** No build chain, framework or drawing library. The
   guide image comes from a built-in software rasteriser; no canvas/WebGL.
-- **Deterministic strokes.** The same plan and paint style always produce the
-  same strokes, which makes caching and regression tests possible.
-- **Plan and render caches are separate.** Switching style or brush size never
-  re-spends LLM tokens.
+- **Deterministic strokes.** The same plan, paint style, brush shape and seed
+  always produce the same strokes and leaf mix, which makes caching and
+  regression tests possible.
+- **Plan and render caches are separate.** Switching style, brush shape or
+  brush size never re-spends LLM tokens.
 
 ## Known limitations
 
@@ -750,8 +770,8 @@ eval/                prompts and batch evaluation
 
 Four caches/seeds are involved: plan cache (prompt + style + mode + variant +
 style pack + vision + detail), render cache (plan + render + paint style +
-brush), the deterministic stroke seed, and the local planner's deterministic
-seed. The page increments `variant` on every generate, which bypasses the plan
+brush shape + brush), the deterministic stroke seed, and the local planner's
+deterministic seed. The page increments `variant` on every generate, which bypasses the plan
 cache. API callers must increment `variant` themselves for a new composition.
 
 **“LLM returned 503” / “The request queue is full”**

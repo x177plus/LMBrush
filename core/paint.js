@@ -14,7 +14,7 @@
 
 import { rasterizePlan } from "./raster.js";
 import { elementBounds as boundsOf } from "./bounds.js";
-import { parseHex, toHex, tint, jitterColor } from "./color.js";
+import { parseHex, toHex, tint, jitterColor, luminance } from "./color.js";
 
 const CLASSIC_PASSES = [
   {
@@ -141,6 +141,10 @@ export const MIN_BRUSH_SCALE = 0.8;
 export const MAX_BRUSH_SCALE = 1.8;
 
 const PAINT_STYLES = new Set(["classic", "blockin"]);
+// Brush tips are independent of the stroke layout. Keep the default first so
+// callers can treat the list as an allowlist with a stable fallback.
+export const BRUSH_SHAPES = ["default", "leaf"];
+export const LEAF_TYPES = ["simple", "maple", "ginkgo", "oak"];
 const CLASSIC_GUIDE_SIZE = 192;
 const BLOCKIN_GUIDE_SIZE = 256;
 const BLOCKIN_MAX_STROKES = 3200;
@@ -154,6 +158,7 @@ function guideSizeFor(isBlockin) {
 export function renderPainting(plan, options = {}) {
   const paintStyle = PAINT_STYLES.has(options.paintStyle) ? options.paintStyle : "classic";
   const isBlockin = paintStyle === "blockin";
+  const brushShape = BRUSH_SHAPES.includes(options.brushShape) ? options.brushShape : "default";
   const scale = clamp(Number(options.brushScale) || 1, MIN_BRUSH_SCALE, MAX_BRUSH_SCALE);
   const requestedBatches = options.batches === undefined ? 120 : Number(options.batches);
   const batches = Math.round(clamp(Number.isFinite(requestedBatches) ? requestedBatches : 120, 0, 160));
@@ -179,11 +184,18 @@ export function renderPainting(plan, options = {}) {
     && options.angleGuide.data.length >= options.angleGuide.width * options.angleGuide.height * 3
     ? options.angleGuide
     : guide;
-  // Keep the classic seed formula unchanged so existing output stays identical.
+  // Keep the default seed formula unchanged so existing output stays identical.
+  // Non-default shapes get their own stream; changing profile or tip must not
+  // depend on the random sequence of another brush.
+  const shapeSeed = brushShape === "default" ? "" : `${brushShape}|`;
   const seed = hashString(
-    `${options.seed || ""}|${scale}|${isBlockin ? "blockin|" : ""}${JSON.stringify(plan)}`
+    `${options.seed || ""}|${scale}|${isBlockin ? "blockin|" : ""}${shapeSeed}${JSON.stringify(plan)}`
   );
   const rnd = mulberry32(seed);
+  // A painting mixes two or three leaf species. The mix is chosen once per
+  // render from the seeded stream, then each mark picks from that live mix.
+  const leafMix = brushShape === "leaf" ? makeLeafMix(rnd) : [];
+  const makeMark = makeMarkForShape(brushShape, leafMix);
   const flow = (rnd() - 0.5) * 1.1;
   const angleThreshold = Number.isFinite(Number(options.angleThreshold))
     ? Number(options.angleThreshold)
@@ -202,13 +214,13 @@ export function renderPainting(plan, options = {}) {
   let maxMassWidth = 0;
 
   if (isBlockin) {
-    const ground = makeGroundStrokes(plan, { rnd });
+    const ground = makeGroundStrokes(plan, { rnd, makeMark });
     strokes.push(...ground);
     // A reference repaint can force guide-sampled masses: the plan is a coarse
     // mosaic, and flat cell averages would show as rectangular blocks.
     const mass = options.massSource === "guide"
-      ? guideMassResult(plan, { scale, rnd, sample })
-      : makeMassStrokes(plan, { scale, rnd, sample });
+      ? guideMassResult(plan, { scale, rnd, sample, makeMark })
+      : makeMassStrokes(plan, { scale, rnd, sample, makeMark });
     strokes.push(...mass.strokes);
     massStrokes = mass.strokes.length;
     massSource = mass.source;
@@ -275,7 +287,7 @@ export function renderPainting(plan, options = {}) {
 
         const color = toHex(jitterColor(tint(base, pass.tint), pass.colorJitter, rnd));
         const alpha = randomBetween(rnd, pass.alpha);
-        strokes.push(makeStroke({
+        strokes.push(makeMark({
           x,
           y,
           length,
@@ -297,6 +309,8 @@ export function renderPainting(plan, options = {}) {
     strokes: strokes.length,
     guide: { width: guide.width, height: guide.height },
     paintStyle,
+    brushShape,
+    leafMix,
     massStrokes,
     massSource,
     maxMassWidth: Math.round(maxMassWidth),
@@ -307,21 +321,21 @@ export function renderPainting(plan, options = {}) {
 /* Keeps the largest marks sampled from the guide when the plan is only a
  * coarse colour summary (reference repaints).
  */
-function guideMassResult(plan, { scale, rnd, sample }) {
-  const fallback = makeGuideMassStrokes(plan, { scale, rnd, sample });
+function guideMassResult(plan, { scale, rnd, sample, makeMark }) {
+  const fallback = makeGuideMassStrokes(plan, { scale, rnd, sample, makeMark });
   return { strokes: fallback.strokes, source: "guide", maxWidth: fallback.maxWidth };
 }
 
 /* A few oversized background strokes guarantee coverage before any detail.
  * They are deliberately larger than the canvas so every aspect ratio works.
  */
-function makeGroundStrokes(plan, { rnd }) {
+function makeGroundStrokes(plan, { rnd, makeMark }) {
   const { w, h } = plan.canvas;
   const base = parseHex(plan.canvas.background) || [255, 255, 255];
   const span = Math.max(w, h);
   const strokes = [];
   for (const angle of [0, Math.PI / 3, -Math.PI / 3]) {
-    strokes.push(makeStroke({
+    strokes.push(makeMark({
       x: w / 2,
       y: h / 2,
       length: span * 2.4,
@@ -341,7 +355,7 @@ function makeGroundStrokes(plan, { rnd }) {
  * LLM's composition decides where the biggest marks land. If the plan has no
  * usable masses (line art, tiny elements), fall back to guide-sampled marks.
  */
-function makeMassStrokes(plan, { scale, rnd, sample }) {
+function makeMassStrokes(plan, { scale, rnd, sample, makeMark }) {
   const { w, h } = plan.canvas;
   const canvasArea = w * h;
   const targets = collectMassTargets(plan);
@@ -379,7 +393,7 @@ function makeMassStrokes(plan, { scale, rnd, sample }) {
       const x = cx + (horizontal ? (rnd() - 0.5) * boxW * 0.06 : offset + (rnd() - 0.5) * bandWidth * 0.2);
       const y = cy + (horizontal ? offset + (rnd() - 0.5) * bandWidth * 0.2 : (rnd() - 0.5) * boxH * 0.06);
       const angle = (horizontal ? 0 : Math.PI / 2) + (rnd() - 0.5) * 0.18;
-      strokes.push(makeStroke({
+      strokes.push(makeMark({
         x,
         y,
         length: bandLength,
@@ -446,7 +460,7 @@ function collectMassTargets(plan) {
     .sort((a, b) => a.layerIndex - b.layerIndex || a.index - b.index);
 }
 
-function makeGuideMassStrokes(plan, { scale, rnd, sample }) {
+function makeGuideMassStrokes(plan, { scale, rnd, sample, makeMark }) {
   const { w, h } = plan.canvas;
   const shortSide = Math.min(w, h);
   const spacing = shortSide * 0.28 * scale;
@@ -468,7 +482,7 @@ function makeGuideMassStrokes(plan, { scale, rnd, sample }) {
         saturation: 4,
         lightness: 3,
       }, rnd));
-      strokes.push(makeStroke({
+      strokes.push(makeMark({
         x,
         y,
         length,
@@ -542,19 +556,234 @@ function makeStroke({ x, y, length, width, angle, color, alpha, bow, taper = tru
   return { d, color, alpha };
 }
 
+function makeLeafMix(rnd) {
+  const pool = [...LEAF_TYPES];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, rnd() < 0.3 ? 2 : 3);
+}
+
+function makeMarkForShape(shape, leafMix) {
+  if (shape !== "leaf") return makeStroke;
+  return (stroke) => {
+    const index = Math.min(leafMix.length - 1, Math.floor(stroke.rnd() * leafMix.length));
+    return makeLeafStroke(stroke, leafMix[index] || "simple");
+  };
+}
+
+/* Leaf marks share one transform: local u runs along the stroke axis and v is
+ * perpendicular. Each species supplies a closed outline plus a separate stem
+ * subpath in one <path>, so stems do not add elements. Variation comes from
+ * the seeded stream and keeps renders deterministic.
+ */
+function makeLeafStroke({ x, y, length, width, angle, color, alpha, bow, taper = true, rnd }, leafType) {
+  const span = taper ? length * 0.96 : length;
+  const shape = leafType === "maple"
+    ? mapleLeaf(span, rnd)
+    : leafType === "ginkgo"
+      ? ginkgoLeaf(span, rnd)
+      : leafType === "oak"
+        ? oakLeaf(span, width, rnd)
+        : simpleLeaf(span, width, rnd);
+  const leafAngle = angle + (leafType === "simple" ? 0 : (rnd() - 0.5) * 0.22);
+  const sin = Math.sin(leafAngle);
+  const cos = Math.cos(leafAngle);
+  const leafBow = bow * (leafType === "simple" ? 1 : 0.65);
+  const map = ([u, v]) => {
+    const t = clamp(u / span + 0.5, 0, 1);
+    const bend = Math.sin(Math.PI * t) * leafBow;
+    return [x + cos * u - sin * (v + bend), y + sin * u + cos * (v + bend)];
+  };
+  const d = pathFromPoints(shape.points.map(map)) + pathFromPoints(shape.stem.map(map));
+  const rgb = parseHex(color) || [0, 0, 0];
+  const veinColor = toHex(tint(rgb, luminance(rgb) < 110 ? 1.35 : 0.78));
+  const vein = shape.veins && shape.veins.length
+    ? {
+        d: shape.veins.map((segment) => lineFromPoints(segment.map(map))).join(""),
+        color: veinColor,
+        alpha: 0.35 + rnd() * 0.15,
+        width: Math.max(0.8, span * 0.014),
+      }
+    : null;
+  return { d, color, alpha, ...(vein ? { vein } : {}) };
+}
+
+function pathFromPoints(points) {
+  return points.map((point, index) => `${index ? "L" : "M"}${fmt(point[0])} ${fmt(point[1])}`).join("") + "Z";
+}
+
+function lineFromPoints(points) {
+  return points.map((point, index) => `${index ? "L" : "M"}${fmt(point[0])} ${fmt(point[1])}`).join("");
+}
+
+function leafStem(baseU, length, width) {
+  const tip = baseU - length;
+  return [
+    [baseU, -width * 0.5],
+    [tip, -width * 0.32],
+    [tip, width * 0.32],
+    [baseU, width * 0.5],
+  ];
+}
+
+/* A lanceolate leaf with a blunt base and a short, visible petiole. */
+function simpleLeaf(span, width, rnd) {
+  const half = Math.max(width, span * 0.52) / 2;
+  const segments = Math.max(7, Math.min(16, Math.round(span / 12)));
+  const skewLeft = 0.72 + rnd() * 0.62;
+  const skewRight = 0.72 + rnd() * 0.62;
+  const balance = 0.84 + rnd() * 0.32;
+  const waveAmp = 0.03 + rnd() * 0.05;
+  const waveCount = 1.8 + rnd() * 1.5;
+  const phaseLeft = rnd() * Math.PI * 2;
+  const phaseRight = rnd() * Math.PI * 2;
+  const base = 0.30 + rnd() * 0.14;
+  const tip = 0.03 + rnd() * 0.025;
+  const left = [];
+  const right = [];
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const u = (t - 0.5) * span;
+    const envelope = (skew) => Math.pow(Math.sin(Math.PI * Math.pow(t, skew)), 0.5);
+    const floor = Math.max(base * Math.pow(1 - t, 1.5), tip * Math.pow(t, 1.5));
+    const wave = (phase) => 1 + waveAmp * Math.sin(t * Math.PI * 2 * waveCount + phase) * Math.sin(Math.PI * t);
+    const leftHalf = half * Math.max(envelope(skewLeft), floor) * balance * wave(phaseLeft);
+    const rightHalf = half * Math.max(envelope(skewRight), floor) / balance * wave(phaseRight);
+    left.push([u, leftHalf]);
+    right.push([u, -rightHalf]);
+  }
+
+  const veins = [[[-span / 2, 0], [0, 0], [span / 2, 0]]];
+  for (const t of [0.45]) {
+    const u = (t - 0.5) * span;
+    const edge = half * Math.pow(Math.sin(Math.PI * t), 0.5) * 0.68;
+    veins.push([[u, 0], [u + span * 0.08, edge]]);
+    veins.push([[u, 0], [u + span * 0.08, -edge]]);
+  }
+
+  return {
+    points: [...left, ...right.reverse()],
+    stem: leafStem(-span / 2, span * (0.075 + rnd() * 0.045), span * 0.03),
+    veins,
+  };
+}
+
+/* The five-lobed maple silhouette: one tall central lobe, two upper side
+ * lobes and two lower lobes, with a petiole at the base notch. */
+function mapleLeaf(span, rnd) {
+  const xs = span * (0.78 + rnd() * 0.08);
+  const ys = span * (0.72 + rnd() * 0.08);
+  const shear = (rnd() - 0.5) * 0.10;
+  const outline = [
+    [0, 0.95], [0.18, 0.55], [0.10, 0.42], [0.45, 0.55],
+    [0.30, 0.25], [0.65, 0.15], [0.30, -0.05], [0.45, -0.30],
+    [0.15, -0.10], [0, -0.35], [-0.15, -0.10], [-0.45, -0.30],
+    [-0.30, -0.05], [-0.65, 0.15], [-0.30, 0.25], [-0.45, 0.55],
+    [-0.10, 0.42], [-0.18, 0.55],
+  ];
+  const local = (nx, ny) => {
+    const u = ny * ys;
+    return [u, nx * xs + u * shear];
+  };
+  const center = local(0, 0.1);
+  const veins = [
+    [local(0, -0.35), center, local(0, 0.95)],
+    [center, local(0.45, 0.55)],
+    [center, local(-0.45, 0.55)],
+    [center, local(0.65, 0.15)],
+    [center, local(-0.65, 0.15)],
+  ];
+  return {
+    points: outline.map(([nx, ny]) => local(nx, ny)),
+    stem: leafStem(-0.35 * ys, span * (0.12 + rnd() * 0.04), span * 0.026),
+    veins,
+  };
+}
+
+/* A fan-shaped ginkgo blade with the characteristic central cleft. */
+function ginkgoLeaf(span, rnd) {
+  const xs = span * (0.85 + rnd() * 0.10);
+  const ys = span * (0.90 + rnd() * 0.08);
+  const shear = (rnd() - 0.5) * 0.06;
+  const outline = [
+    [0, -0.45], [0.08, -0.42], [0.30, -0.25], [0.50, 0.05],
+    [0.62, 0.30], [0.60, 0.41], [0.45, 0.46], [0.30, 0.47],
+    [0.15, 0.45], [0, 0.33], [-0.15, 0.45], [-0.30, 0.47],
+    [-0.45, 0.46], [-0.60, 0.41], [-0.62, 0.30], [-0.50, 0.05],
+    [-0.30, -0.25], [-0.08, -0.42],
+  ];
+  const local = (nx, ny) => {
+    const u = ny * ys;
+    return [u, nx * xs + u * shear];
+  };
+  const center = local(0, 0.02);
+  const veins = [
+    [local(0, -0.45), center, local(0, 0.33)],
+    [center, local(0.45, 0.45)],
+    [center, local(-0.45, 0.45)],
+  ];
+  return {
+    points: outline.map(([nx, ny]) => local(nx, ny)),
+    stem: leafStem(-0.45 * ys, span * (0.17 + rnd() * 0.04), span * 0.03),
+    veins,
+  };
+}
+
+/* An elongated oak leaf with four rounded lobes per side and a petiole. */
+function oakLeaf(span, width, rnd) {
+  const half = Math.max(width, span * 0.54) / 2;
+  const segments = Math.max(12, Math.min(24, Math.round(span / 8)));
+  const phase = rnd() * Math.PI * 2;
+  const leftScale = 0.92 + rnd() * 0.16;
+  const rightScale = 0.92 + rnd() * 0.16;
+  const left = [];
+  const right = [];
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const u = (t - 0.5) * span;
+    const envelope = Math.pow(Math.sin(Math.PI * t), 0.45);
+    const lobe = 0.55 + 0.45 * Math.pow(0.5 + 0.5 * Math.cos(2 * Math.PI * 4 * t + phase), 0.65);
+    const halfWidth = half * envelope * lobe;
+    left.push([u, halfWidth * leftScale]);
+    right.push([u, -halfWidth * rightScale]);
+  }
+
+  const veins = [[[-span / 2, 0], [0, 0], [span / 2, 0]]];
+  for (const t of [0.35, 0.62]) {
+    const u = (t - 0.5) * span;
+    const edge = half * Math.pow(Math.sin(Math.PI * t), 0.45) * 0.62;
+    veins.push([[u, 0], [u + span * 0.08, edge]]);
+    veins.push([[u, 0], [u + span * 0.08, -edge]]);
+  }
+
+  return {
+    points: [...left, ...right.reverse()],
+    stem: leafStem(-span / 2, span * (0.075 + rnd() * 0.035), span * 0.028),
+    veins,
+  };
+}
+
 function serialize(strokes, plan, batches = 0) {
   const out = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${plan.canvas.w} ${plan.canvas.h}" width="${plan.canvas.w}" height="${plan.canvas.h}" role="img" aria-label="${escapeAttr(plan.title || "油画")}">`,
   ];
+  const pushStroke = (stroke) => {
+    out.push(strokePath(stroke));
+    if (stroke.vein) out.push(veinPath(stroke.vein));
+  };
   const grouped = batches >= 2 && strokes.length > 0;
   if (!grouped) {
-    for (const stroke of strokes) out.push(strokePath(stroke));
+    for (const stroke of strokes) pushStroke(stroke);
   } else {
     const size = Math.max(1, Math.ceil(strokes.length / batches));
     for (let index = 0; index < strokes.length; index += size) {
       out.push('<g class="paint-batch">');
       const end = Math.min(strokes.length, index + size);
-      for (let inner = index; inner < end; inner++) out.push(strokePath(strokes[inner]));
+      for (let inner = index; inner < end; inner++) pushStroke(strokes[inner]);
       out.push("</g>");
     }
   }
@@ -565,6 +794,10 @@ function serialize(strokes, plan, batches = 0) {
 function strokePath(stroke) {
   const opacity = stroke.alpha < 0.995 ? ` fill-opacity="${stroke.alpha.toFixed(2)}"` : "";
   return `<path d="${stroke.d}" fill="${stroke.color}"${opacity}/>`;
+}
+
+function veinPath(vein) {
+  return `<path d="${vein.d}" fill="none" stroke="${vein.color}" stroke-width="${fmt(vein.width)}" stroke-linecap="round" opacity="${vein.alpha.toFixed(2)}"/>`;
 }
 
 function makeSampler(guide) {

@@ -9,14 +9,17 @@ import { flattenPathData } from "../core/path-geometry.js";
 const plan = planFromPrompt("一只橘猫，夜晚星空");
 const painting = renderPainting(plan);
 const blockin = renderPainting(plan, { paintStyle: "blockin" });
+const leaf = renderPainting(plan, { brushShape: "leaf" });
+const leafBlockin = renderPainting(plan, { paintStyle: "blockin", brushShape: "leaf" });
 
 function coverageOf(svg, width = 1000, height = 1000, step = 40) {
-  const polygons = [...svg.matchAll(/<path d="([^"]+)"/g)].map((match) => {
-    const numbers = match[1].match(/-?\d+(?:\.\d+)?/g).map(Number);
-    const points = [];
-    for (let i = 0; i + 1 < numbers.length; i += 2) points.push([numbers[i], numbers[i + 1]]);
-    return points;
-  });
+  const polygons = [];
+  for (const match of svg.matchAll(/<path ([^>]+)>/g)) {
+    if (/fill="none"/.test(match[1])) continue;
+    const data = /d="([^"]+)"/.exec(match[1]);
+    if (!data) continue;
+    for (const subpath of flattenPathData(data[1])) polygons.push(subpath.points);
+  }
 
   const inside = (point, polygon) => {
     let result = false;
@@ -156,7 +159,56 @@ test("block-in masses come from the plan and scale with its largest shape", () =
 test("classic remains the default profile", () => {
   assert.equal(renderPainting(plan, { paintStyle: "classic" }).svg, painting.svg);
   assert.equal(painting.paintStyle, "classic");
+  assert.equal(painting.brushShape, "default");
   assert.notEqual(blockin.svg, painting.svg);
+});
+
+test("leaf brush output is made only of brush-stroke paths", () => {
+  assert.ok(leaf.svg.startsWith("<svg"));
+  assert.equal(leaf.brushShape, "leaf");
+  assert.equal(leaf.paintStyle, "classic");
+  assert.ok(leaf.strokes > 1000);
+  assert.ok(!/<(rect|ellipse|polygon|line|circle|text|script|image|filter)\b/i.test(leaf.svg));
+  const paths = leaf.svg.match(/<path /g) || [];
+  assert.ok(paths.length > leaf.strokes, "leaf marks also carry vein paths");
+  const marks = leaf.svg.match(/<path d="[^"]+" fill="#[0-9a-f]{6}"/g) || [];
+  assert.equal(marks.length, leaf.strokes);
+});
+
+test("leaf brush covers the canvas in both paint styles", () => {
+  assert.ok(coverageOf(leaf.svg) > 0.995);
+  assert.equal(leafBlockin.brushShape, "leaf");
+  assert.equal(leafBlockin.paintStyle, "blockin");
+  assert.ok(leafBlockin.strokes > 100);
+  assert.ok(coverageOf(leafBlockin.svg) > 0.995);
+});
+
+test("leaf brush is deterministic, seeded and distinct from the default mark", () => {
+  assert.equal(renderPainting(plan, { brushShape: "leaf" }).svg, leaf.svg);
+  assert.notEqual(leaf.svg, painting.svg);
+  const first = renderPainting(plan, { brushShape: "leaf", seed: "1" });
+  const repeat = renderPainting(plan, { brushShape: "leaf", seed: "1" });
+  const next = renderPainting(plan, { brushShape: "leaf", seed: "2" });
+  assert.equal(first.svg, repeat.svg);
+  assert.notEqual(first.svg, next.svg);
+});
+
+test("leaf brush mixes two or three species automatically", () => {
+  for (const result of [leaf, leafBlockin]) {
+    assert.equal(result.brushShape, "leaf");
+    assert.ok(Array.isArray(result.leafMix));
+    assert.ok(result.leafMix.length >= 2 && result.leafMix.length <= 3);
+    assert.equal(new Set(result.leafMix).size, result.leafMix.length);
+    for (const type of result.leafMix) {
+      assert.ok(["simple", "maple", "ginkgo", "oak"].includes(type));
+    }
+  }
+  assert.ok(coverageOf(leaf.svg) > 0.995);
+  assert.deepEqual(renderPainting(plan, { brushShape: "leaf" }).leafMix, leaf.leafMix);
+});
+
+test("unknown brush shapes fall back to the default mark", () => {
+  assert.equal(renderPainting(plan, { brushShape: "unknown" }).svg, painting.svg);
 });
 
 test("painterly output is deterministic", () => {

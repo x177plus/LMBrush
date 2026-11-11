@@ -211,6 +211,7 @@ test("repaints an uploaded reference image without a description", async () => {
           prompt: "",
           mode: "local",
           paintStyle: "blockin",
+          brushShape: "leaf",
           brush: 1,
           variant: 2,
           image,
@@ -224,6 +225,9 @@ test("repaints an uploaded reference image without a description", async () => {
       assert.equal(body.meta.reference.mode, "faithful");
       assert.equal(body.meta.reference.planSource, "pixel");
       assert.equal(body.meta.paintStyle, "blockin");
+      assert.equal(body.meta.brushShape, "leaf");
+      assert.ok(Array.isArray(body.meta.leafMix));
+      assert.ok(body.meta.leafMix.length >= 2 && body.meta.leafMix.length <= 3);
       assert.equal(body.meta.massSource, "guide");
       assert.equal(body.meta.reference.analysis, "local");
       assert.equal(body.meta.reference.image.width, width);
@@ -274,7 +278,7 @@ test("switching paint style reuses the plan without regenerating it", async () =
   clearCache();
   try {
     await withServer(async (base) => {
-      const post = (paintStyle) => fetch(`${base}/api/generate`, {
+      const post = (paintStyle, brushShape = "default") => fetch(`${base}/api/generate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -282,18 +286,28 @@ test("switching paint style reuses the plan without regenerating it", async () =
           mode: "local",
           render: "paint",
           paintStyle,
+          brushShape,
           variant: 4,
         }),
       }).then((response) => response.json());
 
       const classic = await post("classic");
       const blockin = await post("blockin");
+      const leaf = await post("classic", "leaf");
       assert.equal(classic.meta.paintStyle, "classic");
+      assert.equal(classic.meta.brushShape, "default");
       assert.equal(blockin.meta.paintStyle, "blockin");
+      assert.equal(leaf.meta.brushShape, "leaf");
+      assert.ok(Array.isArray(leaf.meta.leafMix));
+      assert.ok(leaf.meta.leafMix.length >= 2 && leaf.meta.leafMix.length <= 3);
       assert.equal(blockin.meta.planCached, true);
+      assert.equal(leaf.meta.planCached, true);
       assert.notEqual(blockin.meta.cached, true);
+      assert.notEqual(leaf.meta.cached, true);
       assert.deepEqual(blockin.plan, classic.plan);
+      assert.deepEqual(leaf.plan, classic.plan);
       assert.notEqual(blockin.svg, classic.svg);
+      assert.notEqual(leaf.svg, classic.svg);
     });
   } finally {
     if (previous === undefined) delete process.env.LLM_DISABLE;

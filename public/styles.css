@@ -115,8 +115,11 @@ textarea::placeholder { color: var(--muted); }
 .examples button:hover { color: var(--text); border-color: var(--line-control); background: var(--surface); }
 
 .field { display: flex; flex-direction: column; gap: 8px; }
-.field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: flex-start; gap: 16px 0; }
+.field-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: flex-start; gap: 16px; }
 .field-row .field { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+  .field-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 340px) {
   .field-row { grid-template-columns: 1fr; }
 }

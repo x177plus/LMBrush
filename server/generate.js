@@ -12,7 +12,7 @@ import { visionConfig, critiquePlan, shouldRepair, repairPlanFromCritique } from
 import { enrichPlanWithDetails, MAX_DETAIL_REGIONS } from "./detail.js";
 import { pricingConfig, emptyCost, addCost, formatUSD } from "./pricing.js";
 import { renderPlan } from "../core/render.js";
-import { renderPainting, MIN_BRUSH_SCALE, MAX_BRUSH_SCALE } from "../core/paint.js";
+import { renderPainting, BRUSH_SHAPES, MIN_BRUSH_SCALE, MAX_BRUSH_SCALE } from "../core/paint.js";
 import { flattenPathData } from "../core/path-geometry.js";
 
 const MODES = ["auto", "llm", "local"];
@@ -32,7 +32,7 @@ export class GenerationError extends Error {
   }
 }
 
-export async function generate({ prompt, style = "auto", mode = "auto", render = "paint", paintStyle = "classic", brush = 1, variant = 0, stylePack = "", detail = false }) {
+export async function generate({ prompt, style = "auto", mode = "auto", render = "paint", paintStyle = "classic", brushShape = "default", brush = 1, variant = 0, stylePack = "", detail = false }) {
   const started = Date.now();
   const deadline = started + REQUEST_BUDGET_MS;
   const text = String(prompt || "").trim();
@@ -44,6 +44,7 @@ export async function generate({ prompt, style = "auto", mode = "auto", render =
   const safeMode = MODES.includes(mode) ? mode : "auto";
   const safeRender = RENDERS.includes(render) ? render : "paint";
   const safePaintStyle = PAINT_STYLES.includes(paintStyle) ? paintStyle : "classic";
+  const safeBrushShape = BRUSH_SHAPES.includes(brushShape) ? brushShape : "default";
   const brushScale = clampBrush(brush);
   const safeVariant = clampVariant(variant);
   const requestedPack = typeof stylePack === "string" ? stylePack.trim() : "";
@@ -54,8 +55,9 @@ export async function generate({ prompt, style = "auto", mode = "auto", render =
   const cfg = llmConfig();
   const vision = visionConfig();
 
-  // Plan cache is independent of renderer options. Switching paintStyle or
-  // brush size reuses the validated plan and never re-calls the LLM/critic.
+  // Plan cache is independent of renderer options. Switching paintStyle,
+  // brush size or brush shape reuses the validated plan and never re-calls the
+  // LLM/critic.
   const planKey = [
     safeMode,
     cfg.configured ? cfg.model : "local",
@@ -98,7 +100,7 @@ export async function generate({ prompt, style = "auto", mode = "auto", render =
   }
 
   const planJson = JSON.stringify(plan);
-  const renderKey = `${safeRender}|${safeRender === "paint" ? safePaintStyle : "none"}|${brushScale}|v${safeVariant}|${planJson}`;
+  const renderKey = `${safeRender}|${safeRender === "paint" ? safePaintStyle : "none"}|${safeBrushShape}|${brushScale}|v${safeVariant}|${planJson}`;
   const renderStarted = Date.now();
   const cachedRender = renderCache.get(renderKey);
   const renderHit = Boolean(cachedRender);
@@ -111,12 +113,15 @@ export async function generate({ prompt, style = "auto", mode = "auto", render =
       brushScale,
       seed: safeVariant || "",
       paintStyle: safePaintStyle,
+      brushShape: safeBrushShape,
     });
     rendered = {
       svg: painted.svg,
       meta: {
         render: "paint",
         paintStyle: safePaintStyle,
+        brushShape: safeBrushShape,
+        ...(safeBrushShape === "leaf" ? { leafMix: painted.leafMix } : {}),
         strokes: painted.strokes,
         brush: brushScale,
         massStrokes: painted.massStrokes,
@@ -411,6 +416,9 @@ function logComposition({ prompt, plan, meta }) {
       meta.cached ? "cache" : "",
       meta.planCached && !meta.cached ? "plan-cache" : "",
       render === "paint" ? `paint=${meta.paintStyle || "classic"}` : "",
+      render === "paint"
+        ? `shape=${meta.brushShape || "default"}${meta.leafMix?.length ? `(${meta.leafMix.join("+")})` : ""}`
+        : "",
       render === "paint" ? `brush=${meta.brush}` : "",
       render === "paint" ? `strokes=${meta.strokes}` : "",
       render === "paint" && meta.massStrokes
